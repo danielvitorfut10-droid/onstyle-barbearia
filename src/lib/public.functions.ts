@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { buildSlots, dayRange, toIntervals, weekdayOf } from "./booking.server";
 import { publicClient } from "./supabase-public.server";
+// Public site data/availability/booking endpoints (uses publishable key client).
 
 const availabilitySchema = z.object({
   barberId: z.string().uuid(),
