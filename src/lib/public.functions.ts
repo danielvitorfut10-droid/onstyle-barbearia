@@ -6,13 +6,15 @@ import { publicClient } from "./supabase-public.server";
 
 const availabilitySchema = z.object({
   barberId: z.string().uuid(),
-  serviceId: z.string().uuid(),
+  // serviceId pode ser UUID real ou ID canônico virtual (srv-canonical-N)
+  serviceId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 const bookingSchema = z.object({
   barberId: z.string().uuid(),
-  serviceId: z.string().uuid(),
+  // serviceId pode ser UUID real do banco ou ID canônico virtual (srv-canonical-N)
+  serviceId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^\d{2}:\d{2}$/),
   name: z.string().trim().min(2).max(80),
@@ -274,7 +276,11 @@ export const getAvailability = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = publicClient();
 
-    const [{ data: service }, { data: hour }] = await Promise.all([
+    // Busca o horário do dia (obrigatório) e opcionalmente o serviço
+    // O serviceId pode ser um ID canônico virtual (srv-canonical-*) que não existe no banco —
+    // nesse caso usamos 60 min como duração padrão em vez de retornar slots vazios.
+    const [serviceRes, hourRes] = await Promise.all([
+      // Tenta buscar pelo ID real; se não encontrar, não é erro — usamos fallback
       db
         .from("services")
         .select("duration_min")
@@ -287,7 +293,13 @@ export const getAvailability = createServerFn({ method: "POST" })
         .maybeSingle(),
     ]);
 
-    if (!service || !hour || hour.closed) return { slots: [] as { time: string; iso: string }[] };
+    const hour = hourRes.data;
+
+    // Só retorna vazio se o dia não tiver horário configurado ou estiver fechado
+    if (!hour || hour.closed) return { slots: [] as { time: string; iso: string }[] };
+
+    // Duração: usa a do banco se disponível, senão 60 min (padrão OnStyle)
+    const durationMin = serviceRes.data?.duration_min ?? 60;
 
     const range = dayRange(data.date);
     const { data: busyRows } = await db.rpc("get_public_busy", {
@@ -306,7 +318,7 @@ export const getAvailability = createServerFn({ method: "POST" })
       openTime: String(hour.open_time).slice(0, 5),
       closeTime: String(hour.close_time).slice(0, 5),
       intervalMin: 60,
-      durationMin: 60, // sempre 1 hora independente do serviço
+      durationMin,
       busy: toIntervals(busy),
       unblockedNightStarts,
     });
@@ -323,9 +335,39 @@ export const createBooking = createServerFn({ method: "POST" })
     if (Number.isNaN(startsAt.getTime())) {
       return { ok: false as const, error: "Escolha um horário futuro." };
     }
+
+    // Resolve o serviceId: se for um ID canônico virtual (não-UUID), busca o serviço real pelo nome
+    let resolvedServiceId = data.serviceId;
+    if (!data.serviceId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      // É um ID canônico virtual — tenta descobrir que serviço é pelo sort_order embutido no ID
+      // Exemplo: "srv-canonical-3" → sort_order 3 → "Corte"
+      const { data: allServices } = await supabasePublic
+        .from("services")
+        .select("id, name, sort_order")
+        .eq("active", true)
+        .order("sort_order");
+
+      // Extrai o número do canonical ID e tenta casar com sort_order ou nome via CANONICAL_SERVICES
+      const canonicalOrder = parseInt(data.serviceId.replace("srv-canonical-", ""), 10);
+      const canonical = CANONICAL_SERVICES.find((c) => c.sort_order === canonicalOrder);
+
+      if (canonical && allServices && allServices.length > 0) {
+        const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
+        const match =
+          allServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
+          allServices[0];
+        resolvedServiceId = match.id;
+      } else if (allServices && allServices.length > 0) {
+        // Fallback: usa o primeiro serviço ativo
+        resolvedServiceId = allServices[0].id;
+      } else {
+        return { ok: false as const, error: "Serviço não encontrado. Tente novamente." };
+      }
+    }
+
     const { data: res, error } = await supabasePublic.rpc("create_public_booking", {
       _barber_id: data.barberId,
-      _service_id: data.serviceId,
+      _service_id: resolvedServiceId,
       _starts_at: startsAt.toISOString(),
       _name: data.name,
       _phone: data.phone,

@@ -2243,6 +2243,24 @@ function EditAppointmentModal({
 }
 
 // ─────────────────────────────────────────────
+// Serviços estáticos de fallback (caso o Supabase retorne vazio)
+// ─────────────────────────────────────────────
+const STATIC_SERVICES = [
+  { id: "static_corte",           name: "Corte",                       price_cents: 4000, duration_min: 60 },
+  { id: "static_barba",           name: "Barba",                       price_cents: 3000, duration_min: 60 },
+  { id: "static_corte_barba",     name: "Corte + Barba",               price_cents: 7000, duration_min: 60 },
+  { id: "static_corte_barba_sob", name: "Corte + Barba + Sobrancelha", price_cents: 8500, duration_min: 60 },
+  { id: "static_luzes",           name: "Luzes",                       price_cents: 6000, duration_min: 60 },
+  { id: "static_platinado",       name: "Platinado",                   price_cents: 11000, duration_min: 60 },
+  { id: "static_relaxamento",     name: "Relaxamento",                 price_cents: 4000, duration_min: 60 },
+  { id: "static_limpeza",         name: "Limpeza de Pele",             price_cents: 2000, duration_min: 60 },
+  { id: "static_sobrancelha",     name: "Sobrancelha",                 price_cents: 1500, duration_min: 60 },
+  { id: "static_cavanhaque",      name: "Cavanhaque",                  price_cents: 1500, duration_min: 60 },
+  { id: "static_pezinho",         name: "Pezinho",                     price_cents: 2000, duration_min: 60 },
+  { id: "corte_mensal",           name: "Corte Mensal (Plano Mensal)", price_cents: 0,    duration_min: 60 },
+];
+
+// ─────────────────────────────────────────────
 // Modal: Adicionar Atendimento Manual (Concluído)
 // ─────────────────────────────────────────────
 function AddAppointmentModal({
@@ -2264,18 +2282,29 @@ function AddAppointmentModal({
   const [time, setTime] = useState(format(new Date(), "HH:mm"));
   const [notes, setNotes] = useState("");
 
-  // Fetch active services
-  const { data: services = [] } = useQuery({
-    queryKey: ["active-services"],
+  // Busca TODOS os serviços do banco (ativos e inativos) sem filtro
+  // para garantir que todos aparecem no painel admin
+  const { data: dbServices = [], isLoading: servicesLoading } = useQuery({
+    queryKey: ["all-services-manual"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("services")
-        .select("id, name, price_cents, duration_min")
-        .eq("active", true)
-        .order("sort_order");
+        .select("id, name, price_cents, duration_min, active")
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
       return data ?? [];
     },
   });
+
+  // Lista final de serviços: todos do banco + opções especiais
+  // Usa lista estática apenas se o banco estiver vazio
+  const services: Array<{ id: string; name: string; price_cents: number; duration_min: number }> =
+    dbServices.length > 0
+      ? [
+          ...dbServices,
+          { id: "corte_mensal", name: "Corte Mensal (Plano Mensal - R$ 0,00)", price_cents: 0, duration_min: 60 },
+        ]
+      : STATIC_SERVICES;
 
   // Fetch active barbers if admin
   const { data: barbers = [] } = useQuery({
@@ -2291,6 +2320,7 @@ function AddAppointmentModal({
     enabled: role === "admin",
   });
 
+  // Define barbeiro padrão quando os dados chegam
   useEffect(() => {
     if (!selectedBarberId && barber?.id) {
       setSelectedBarberId(barber.id);
@@ -2299,22 +2329,28 @@ function AddAppointmentModal({
     }
   }, [barber, barbers, selectedBarberId]);
 
+  // Define serviço padrão (primeiro da lista) quando os serviços carregam
   useEffect(() => {
     if (!serviceId && services.length > 0) {
-      setServiceId(services[0].id);
-      setCustomPriceInput((services[0].price_cents / 100).toFixed(2).replace(".", ","));
+      const first = services[0];
+      setServiceId(first.id);
+      setCustomPriceInput(
+        first.price_cents > 0
+          ? (first.price_cents / 100).toFixed(2).replace(".", ",")
+          : "0,00"
+      );
     }
   }, [services, serviceId]);
 
   const handleServiceChange = (newServiceId: string) => {
     setServiceId(newServiceId);
-    if (newServiceId === "corte_mensal") {
-      setCustomPriceInput("0,00");
-    } else {
-      const found = services.find((s) => s.id === newServiceId);
-      if (found) {
-        setCustomPriceInput((found.price_cents / 100).toFixed(2).replace(".", ","));
-      }
+    const found = services.find((s) => s.id === newServiceId);
+    if (found) {
+      setCustomPriceInput(
+        found.price_cents > 0
+          ? (found.price_cents / 100).toFixed(2).replace(".", ",")
+          : "0,00"
+      );
     }
   };
 
@@ -2322,33 +2358,67 @@ function AddAppointmentModal({
     mutationFn: async () => {
       if (!clientName.trim()) throw new Error("Informe o nome do cliente.");
       if (!serviceId) throw new Error("Selecione um serviço.");
+
       const bId = selectedBarberId || barber?.id;
-      if (!bId) throw new Error("Barbeiro não identificado.");
+      if (!bId) throw new Error("Barbeiro não identificado. Selecione um barbeiro.");
 
-      let targetServiceId = serviceId;
-      let duration = 30;
+      // Resolve o service_id real para inserção no banco
+      let targetServiceId: string = serviceId;
+      const selectedService = services.find((s) => s.id === serviceId);
+      const duration: number = selectedService?.duration_min ?? 60;
 
+      // "corte_mensal" é um ID virtual — resolve para o serviço "Corte" real no banco
       if (serviceId === "corte_mensal") {
-        const foundCorte = services.find((s) => s.name.toLowerCase().includes("corte")) || services[0];
-        targetServiceId = foundCorte?.id ?? "";
-        duration = foundCorte?.duration_min ?? 30;
-      } else {
-        const selectedService = services.find((s) => s.id === serviceId);
-        duration = selectedService?.duration_min ?? 30;
+        const realCorte =
+          dbServices.find((s) =>
+            s.name.toLowerCase().replace(/\s+/g, "").startsWith("corte")
+          ) ?? dbServices[0];
+        if (!realCorte?.id) {
+          throw new Error(
+            "Serviço 'Corte' não encontrado no banco. Cadastre os serviços no painel primeiro."
+          );
+        }
+        targetServiceId = realCorte.id;
       }
 
-      if (!targetServiceId) throw new Error("Serviço não identificado.");
+      // Se ainda for um ID estático (fallback sem banco) → tenta resolver pelo nome
+      if (targetServiceId.startsWith("static_")) {
+        const staticSvc = STATIC_SERVICES.find((s) => s.id === serviceId);
+        if (staticSvc && dbServices.length > 0) {
+          const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const match =
+            dbServices.find((s) => nameNorm(s.name) === nameNorm(staticSvc.name)) ??
+            dbServices[0];
+          targetServiceId = match.id;
+        } else {
+          throw new Error(
+            "Nenhum serviço cadastrado no banco de dados. Contate o administrador."
+          );
+        }
+      }
 
-      const cleanPrice = (customPriceInput || "0").replace(/[^\d,.]/g, "").replace(",", ".");
+      if (!targetServiceId || targetServiceId.startsWith("static_")) {
+        throw new Error("Serviço inválido. Tente selecionar outro serviço.");
+      }
+
+      // Processa o valor
+      const cleanPrice = (customPriceInput || "0")
+        .replace(/[^\d,.]/g, "")
+        .replace(",", ".");
       const parsedVal = parseFloat(cleanPrice);
-      const priceCents = Number.isNaN(parsedVal) || parsedVal < 0 ? 0 : Math.round(parsedVal * 100);
+      const priceCents =
+        Number.isNaN(parsedVal) || parsedVal < 0 ? 0 : Math.round(parsedVal * 100);
 
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Informe uma data válida.");
+      // Processa data e hora
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+        throw new Error("Data inválida. Use o formato correto.");
       const hhmm = (time || "12:00").slice(0, 5);
       const startDate = new Date(`${date}T${hhmm}:00-03:00`);
-      if (Number.isNaN(startDate.getTime())) throw new Error("Informe um horário válido.");
+      if (Number.isNaN(startDate.getTime()))
+        throw new Error("Horário inválido. Use o formato HH:MM.");
       const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
 
+      // Verifica conflitos de horário
       const { data: conflicts } = await supabase
         .from("appointments")
         .select("id, starts_at, ends_at")
@@ -2357,20 +2427,25 @@ function AddAppointmentModal({
         .lt("starts_at", endDate.toISOString())
         .gt("ends_at", startDate.toISOString())
         .limit(1);
+
       if (conflicts && conflicts.length > 0) {
         const c = conflicts[0];
         throw new Error(
-          `Já existe um atendimento das ${format(parseISO(c.starts_at), "HH:mm")} às ${format(parseISO(c.ends_at), "HH:mm")} nesse horário. Escolha outro horário.`
+          `Conflito: já há atendimento das ${format(parseISO(c.starts_at), "HH:mm")} às ${format(parseISO(c.ends_at), "HH:mm")}. Escolha outro horário.`
         );
       }
 
+      // Monta notes finais
       let finalNotes = notes.trim();
       if (serviceId === "corte_mensal") {
-        finalNotes = finalNotes ? `[Corte Mensal] ${finalNotes}` : "Corte Mensal (Plano Mensal)";
+        finalNotes = finalNotes
+          ? `[Corte Mensal] ${finalNotes}`
+          : "Corte Mensal (Plano Mensal)";
       } else if (!finalNotes) {
         finalNotes = "Atendimento balcão (Adicionado no painel)";
       }
 
+      // Insere o agendamento
       const { error } = await supabase.from("appointments").insert({
         barber_id: bId,
         service_id: targetServiceId,
@@ -2384,8 +2459,11 @@ function AddAppointmentModal({
       });
 
       if (error) {
-        if (error.code === "23P01") throw new Error("Esse horário já está ocupado. Escolha outro horário.");
-        throw new Error("Não foi possível salvar o atendimento. Tente novamente.");
+        // Código de violação de exclusão mútua (horário ocupado)
+        if (error.code === "23P01" || error.code === "23505") {
+          throw new Error("Esse horário já está ocupado. Escolha outro horário.");
+        }
+        throw new Error(`Erro ao salvar: ${error.message}`);
       }
     },
     onSuccess: () => {
@@ -2393,17 +2471,22 @@ function AddAppointmentModal({
       queryClient.invalidateQueries({ queryKey: ["painel-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["clientes-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["site-data"] });
-      toast.success("Atendimento concluído adicionado e receita atualizada!");
+      queryClient.invalidateQueries({ queryKey: ["all-services-manual"] });
+      toast.success("Atendimento adicionado com sucesso!");
       onClose();
     },
-    onError: (err: any) => {
-      toast.error(err?.message || "Erro ao adicionar atendimento.");
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao adicionar atendimento.";
+      toast.error(msg);
     },
   });
 
+  const isCorteMenusal = serviceId === "corte_mensal";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl space-y-5">
+      <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center gap-2 text-emerald-400">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20">
@@ -2426,7 +2509,7 @@ function AddAppointmentModal({
           }}
           className="space-y-4 text-xs"
         >
-          {/* Cliente Name */}
+          {/* Nome do Cliente */}
           <div>
             <label className="block font-semibold text-zinc-300 mb-1">Nome do Cliente *</label>
             <input
@@ -2451,24 +2534,34 @@ function AddAppointmentModal({
             />
           </div>
 
-          {/* Service & Barber Grid */}
+          {/* Serviço + Barbeiro */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Serviço */}
             <div>
               <label className="block font-semibold text-zinc-300 mb-1">Serviço Realizado *</label>
-              <select
-                value={serviceId}
-                onChange={(e) => handleServiceChange(e.target.value)}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} (R$ {(s.price_cents / 100).toFixed(2).replace(".", ",")})
-                  </option>
-                ))}
-                <option value="corte_mensal">Corte Mensal (Plano Mensal - R$ 0,00 ou Personalizado)</option>
-              </select>
+              {servicesLoading ? (
+                <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Carregando...</span>
+                </div>
+              ) : (
+                <select
+                  value={serviceId}
+                  onChange={(e) => handleServiceChange(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.id === "corte_mensal"
+                        ? s.name
+                        : `${s.name} (R$ ${(s.price_cents / 100).toFixed(2).replace(".", ",")})`}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
+            {/* Barbeiro (admin only) */}
             {role === "admin" && barbers.length > 0 ? (
               <div>
                 <label className="block font-semibold text-zinc-300 mb-1">Barbeiro *</label>
@@ -2487,9 +2580,9 @@ function AddAppointmentModal({
             ) : null}
           </div>
 
-          {/* Valor Gasto (R$) */}
+          {/* Valor Gasto */}
           <div>
-            <label className="block font-semibold text-zinc-300 mb-1">Valor Gasto (R$) *</label>
+            <label className="block font-semibold text-zinc-300 mb-1">Valor Cobrado (R$) *</label>
             <div className="relative">
               <span className="absolute left-3 top-2 text-zinc-400 font-bold">R$</span>
               <input
@@ -2501,12 +2594,19 @@ function AddAppointmentModal({
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2 pl-10 pr-3 text-white font-bold focus:border-emerald-500/50 focus:outline-none"
               />
             </div>
-            <p className="text-[10px] text-zinc-500 mt-1">
-              Para atendimentos de plano mensal, informe R$ 0,00 ou o valor cobrado.
-            </p>
+            {isCorteMenusal && (
+              <p className="text-[10px] text-[#39ff14] mt-1">
+                Plano Mensal: informe R$ 0,00 ou o valor cobrado neste mês.
+              </p>
+            )}
+            {!isCorteMenusal && (
+              <p className="text-[10px] text-zinc-500 mt-1">
+                O valor é preenchido automaticamente com o preço do serviço. Ajuste se necessário.
+              </p>
+            )}
           </div>
 
-          {/* Date & Time */}
+          {/* Data e Hora */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-zinc-300 mb-1">Data *</label>
@@ -2529,7 +2629,7 @@ function AddAppointmentModal({
             </div>
           </div>
 
-          {/* Notes */}
+          {/* Observação */}
           <div>
             <label className="block font-semibold text-zinc-300 mb-1">Observação (Opcional)</label>
             <input
@@ -2541,17 +2641,19 @@ function AddAppointmentModal({
             />
           </div>
 
+          {/* Botões */}
           <div className="flex gap-3 pt-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 py-2.5 text-xs font-bold text-zinc-300 hover:bg-zinc-700"
+              disabled={addMutation.isPending}
+              className="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 py-2.5 text-xs font-bold text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={addMutation.isPending}
+              disabled={addMutation.isPending || servicesLoading || !serviceId}
               className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
             >
               {addMutation.isPending ? (
@@ -2569,4 +2671,6 @@ function AddAppointmentModal({
     </div>
   );
 }
+
+
 
