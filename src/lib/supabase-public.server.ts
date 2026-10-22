@@ -10,8 +10,18 @@ export function publicClient() {
   return createClient<Database>(url, key, {
     auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
     global: {
-      headers: { apikey: key },
+      fetch: (input, init) => {
+        const h = new Headers(init?.headers);
+        // Lovable's new sb_ keys are opaque strings, not JWTs — remove Authorization Bearer
+        if ((key.startsWith("sb_publishable_") || key.startsWith("sb_secret_")) &&
+            h.get("Authorization") === `Bearer ${key}`) {
+          h.delete("Authorization");
+        }
+        h.set("apikey", key);
+        return fetch(input, { ...init, headers: h });
+      },
     },
   });
 }
+
 
