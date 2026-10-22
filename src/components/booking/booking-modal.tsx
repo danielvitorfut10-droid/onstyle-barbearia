@@ -144,6 +144,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const slotsQuery = useQuery({
     queryKey: ["availability", barberId, serviceId, date],
     enabled: Boolean(open && barberId && serviceId && date),
+    staleTime: 0,          // sempre busca fresco ao mudar data/barbeiro/serviço
+    gcTime: 2 * 60 * 1000, // mantém cache por 2 min para navegação entre steps
+    retry: 1,
     queryFn: () =>
       availabilityFn({ data: { barberId: barberId!, serviceId: serviceId!, date: date! } }),
   });
@@ -449,11 +452,23 @@ export function BookingModal({ open, onOpenChange }: Props) {
               {/* ── STEP 3: Horário ──────────────────────── */}
               {step === 3 && (
                 <div>
-                  {slotsQuery.isLoading ? (
+                  {(slotsQuery.isFetching || slotsQuery.isPending) ? (
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                       {Array.from({ length: 8 }).map((_, i) => (
                         <Skeleton key={i} className="h-10 w-full rounded-xl" />
                       ))}
+                    </div>
+                  ) : slotsQuery.isError ? (
+                    <div className="py-10 text-center space-y-3">
+                      <p className="text-sm text-destructive">
+                        Erro ao carregar horários. Tente novamente.
+                      </p>
+                      <button
+                        onClick={() => slotsQuery.refetch()}
+                        className="text-xs underline text-muted-foreground"
+                      >
+                        Tentar novamente
+                      </button>
                     </div>
                   ) : (slotsQuery.data?.slots.length ?? 0) === 0 ? (
                     <div className="py-10 text-center">

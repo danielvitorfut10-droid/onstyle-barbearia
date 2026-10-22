@@ -1330,7 +1330,9 @@ function AgendamentosTab({
   const calEnd = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 0 });
   const calDays = eachDayOfInterval({ start: calStart, end: calEnd });
 
-  // For selected day — build time slots starting from 06:00 AM up to 00:00 (midnight)
+  // For selected day — build time slots from 06:00 up to 23:59
+  // Each slot is marked as isEarly (before open) or isAfterClose (at or after close time)
+  // so the UI can visually distinguish them.
   const selectedDaySlots = (() => {
     if (!selectedDay) return [];
     const weekday = selectedDay.getDay();
@@ -1338,13 +1340,16 @@ function AgendamentosTab({
     if (!hours || hours.closed) return [];
 
     const interval = 60;
-    const [openH] = hours.open_time.slice(0, 5).split(":").map(Number);
+    const [openH, openM = 0] = hours.open_time.slice(0, 5).split(":").map(Number);
+    const [closeH, closeM = 0] = hours.close_time.slice(0, 5).split(":").map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
 
     const slots: { time: string; iso: string; isNight: boolean; isEarly: boolean }[] = [];
     let h = 6;
     let m = 0;
-    // Extend closing time to 23:59 so 23:30 slot ending at 00:00 is generated
     while (h * 60 + m < 23 * 60 + 59) {
+      const currentMinutes = h * 60 + m;
       const iso = new Date(
         selectedDay.getFullYear(),
         selectedDay.getMonth(),
@@ -1355,8 +1360,8 @@ function AgendamentosTab({
       slots.push({
         time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
         iso,
-        isNight: h >= 19,
-        isEarly: h < openH,
+        isNight: currentMinutes >= closeMinutes,  // após o fechamento real (não fixo 19h)
+        isEarly: currentMinutes < openMinutes,
       });
       m += interval;
       if (m >= 60) {

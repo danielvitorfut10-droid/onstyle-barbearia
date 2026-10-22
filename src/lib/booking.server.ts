@@ -40,22 +40,22 @@ export function buildSlots(params: {
   const minStart = now.getTime() + 10 * 60 * 1000;
 
   const open = minutesOf(openTime);
-  // Start loop from 06:00 AM (360 min) or open time, whichever is earlier
+  // Horário real de fechamento do expediente (ex: 13:00 no domingo, 19:00 nos outros dias)
+  const closeReal = minutesOf(params.closeTime);
+  // O loop percorre de 06:00 até 23:59 para também servir horários desbloqueados fora do expediente
   const startLoop = Math.min(open, 6 * 60);
-  // Extend closing time to 23:59 to allow slots up to 00:00 (midnight)
-  const close = Math.max(minutesOf(params.closeTime), 23 * 60 + 59);
+  const loopEnd = 23 * 60 + 59;
   const slots: Slot[] = [];
 
-  for (let m = startLoop; m + durationMin <= close; m += intervalMin) {
+  for (let m = startLoop; m + durationMin <= loopEnd; m += intervalMin) {
     const time = `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
     const iso = toIso(dateStr, time);
     const start = new Date(iso).getTime();
-    const end = start + durationMin * 60 * 1000;
     if (start < minStart) continue;
 
-    // Slots before open time (< open, e.g. 06:00-09:00) OR from 19:00 onwards (>= 1140)
-    // are blocked by default unless explicitly unblocked (reason = 'desbloqueado')
-    if (m < open || m >= 1140) {
+    // Horários fora do expediente (antes da abertura ou no/após o fechamento real)
+    // só aparecem se explicitamente desbloqueados pelo barbeiro.
+    if (m < open || m >= closeReal) {
       const isUnblocked = unblockedStarts.some((t) => Math.abs(t - start) < 60000);
       if (!isUnblocked) continue;
     }
