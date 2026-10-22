@@ -22,6 +22,8 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
 
   // ── Change-password state ─────────────────────────────────────────────────
   const [step, setStep] = useState<Step>("login");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -92,8 +94,12 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
     e.preventDefault();
     setChangeError(null);
 
-    if (newPassword.length < 6) {
-      setChangeError("A nova senha deve ter pelo menos 6 caracteres.");
+    if (!currentPassword) {
+      setChangeError("Informe sua senha atual.");
+      return;
+    }
+    if (!newPassword) {
+      setChangeError("Informe a nova senha.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -104,14 +110,34 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
     setChangingPassword(true);
 
     try {
+      // Re-authenticate with current password before updating
+      const { error: reAuthError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: currentPassword,
+      });
+
+      if (reAuthError) {
+        setChangeError("Senha atual incorreta. Verifique e tente novamente.");
+        setChangingPassword(false);
+        return;
+      }
+
       // Update password
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
-        data: { password_changed: true }, // ← flag permanente; este campo não volta false
+        data: { password_changed: true },
       });
 
       if (updateError) {
-        setChangeError("Não foi possível alterar a senha. Tente novamente.");
+        console.error("[ChangePassword] updateError:", updateError);
+        const msg = updateError.message?.toLowerCase() ?? "";
+        if (msg.includes("same password") || msg.includes("different from the old password")) {
+          setChangeError("A nova senha não pode ser igual à senha atual. Escolha outra.");
+        } else if (msg.includes("at least 6")) {
+          setChangeError("A senha deve ter pelo menos 6 caracteres.");
+        } else {
+          setChangeError(`Não foi possível alterar a senha: ${updateError.message || "Tente novamente."}`);
+        }
         setChangingPassword(false);
         return;
       }
@@ -262,6 +288,32 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
             </div>
 
             <form onSubmit={handleChangePassword} className="space-y-4">
+              {/* Senha atual */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Senha atual
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Sua senha de acesso atual"
+                    required
+                    autoComplete="current-password"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    tabIndex={-1}
+                  >
+                    {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
               {/* Nova senha */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
@@ -272,7 +324,7 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
                     type={showNewPassword ? "text" : "password"}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Digite a nova senha"
                     required
                     autoComplete="new-password"
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20"
