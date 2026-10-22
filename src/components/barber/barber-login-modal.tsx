@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, User, Eye, EyeOff, Loader2, Scissors } from "lucide-react";
+import { X, Eye, EyeOff, Loader2, Scissors, Lock, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRouter } from "@tanstack/react-router";
 
@@ -8,16 +8,30 @@ interface BarberLoginModalProps {
   onClose: () => void;
 }
 
+type Step = "login" | "change-password" | "done";
+
 export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
   const router = useRouter();
+
+  // ── Login state ───────────────────────────────────────────────────────────
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Change-password state ─────────────────────────────────────────────────
+  const [step, setStep] = useState<Step>("login");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [changeError, setChangeError] = useState<string | null>(null);
+
   if (!open) return null;
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -41,7 +55,7 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
         return;
       }
 
-      // Check if user has barber or admin role
+      // Check barber/admin role
       const { data: roles } = await supabase
         .from("user_roles")
         .select("role")
@@ -56,21 +70,82 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
         return;
       }
 
-      onClose();
-      router.navigate({ to: "/painel" });
+      // Check if this user still needs to set a new password (one-time)
+      const passwordChanged = data.user.user_metadata?.password_changed === true;
+
+      if (passwordChanged) {
+        // Already changed — go straight to panel
+        onClose();
+        router.navigate({ to: "/painel" });
+      } else {
+        // First login — ask to change password
+        setStep("change-password");
+        setLoading(false);
+      }
     } catch {
       setError("Erro inesperado. Tente novamente.");
       setLoading(false);
     }
   }
 
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setChangeError(null);
+
+    if (newPassword.length < 6) {
+      setChangeError("A nova senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setChangeError("As senhas não coincidem.");
+      return;
+    }
+
+    setChangingPassword(true);
+
+    try {
+      // Update password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+        data: { password_changed: true }, // ← flag permanente; este campo não volta false
+      });
+
+      if (updateError) {
+        setChangeError("Não foi possível alterar a senha. Tente novamente.");
+        setChangingPassword(false);
+        return;
+      }
+
+      // Show success briefly, then navigate
+      setStep("done");
+      setTimeout(() => {
+        onClose();
+        router.navigate({ to: "/painel" });
+      }, 1800);
+    } catch {
+      setChangeError("Erro inesperado. Tente novamente.");
+      setChangingPassword(false);
+    }
+  }
+
+  async function handleSkip() {
+    // Mark as changed (skip) and go to panel
+    await supabase.auth.updateUser({ data: { password_changed: true } });
+    onClose();
+    router.navigate({ to: "/painel" });
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && step === "login" && onClose()}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={() => step === "login" && onClose()}
+      />
 
       {/* Modal */}
       <div
@@ -79,99 +154,223 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
           background: "linear-gradient(135deg, rgba(18,18,18,0.98) 0%, rgba(30,30,30,0.98) 100%)",
         }}
       >
-        {/* Green accent top bar */}
+        {/* Accent top bar */}
         <div className="h-1 w-full bg-gradient-to-r from-[#39ff14]/0 via-[#39ff14] to-[#39ff14]/0" />
 
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
-          aria-label="Fechar"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        {/* Close button — only on login step */}
+        {step === "login" && (
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
+            aria-label="Fechar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
 
-        <div className="px-8 pb-8 pt-7">
-          {/* Header */}
-          <div className="mb-7 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 shadow-lg">
-              <Scissors className="h-6 w-6 text-[#39ff14]" />
-            </div>
-            <h2 className="font-display text-xl font-bold text-white">Área do Barbeiro</h2>
-            <p className="mt-1 text-sm text-zinc-500">Acesso exclusivo para profissionais</p>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                E-mail
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@email.com"
-                required
-                autoComplete="email"
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-[#39ff14]/60 focus:ring-1 focus:ring-[#39ff14]/30"
-              />
+        {/* ── STEP: LOGIN ─────────────────────────────────────────── */}
+        {step === "login" && (
+          <div className="px-8 pb-8 pt-7">
+            <div className="mb-7 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 shadow-lg">
+                <Scissors className="h-6 w-6 text-[#39ff14]" />
+              </div>
+              <h2 className="font-display text-xl font-bold text-white">Área do Barbeiro</h2>
+              <p className="mt-1 text-sm text-zinc-500">Acesso exclusivo para profissionais</p>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Senha
-              </label>
-              <div className="relative">
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  E-mail
+                </label>
                 <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
                   required
-                  autoComplete="current-password"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-[#39ff14]/60 focus:ring-1 focus:ring-[#39ff14]/30"
+                  autoComplete="email"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-[#39ff14]/60 focus:ring-1 focus:ring-[#39ff14]/30"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition-colors hover:text-zinc-300"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
               </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="current-password"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-[#39ff14]/60 focus:ring-1 focus:ring-[#39ff14]/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition-colors hover:text-zinc-300"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#39ff14] px-4 py-3 text-sm font-bold text-black shadow-lg shadow-[#39ff14]/20 transition-all hover:bg-[#39ff14]/90 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Entrando...
+                  </>
+                ) : (
+                  <>
+                    <Scissors className="h-4 w-4" />
+                    Entrar no painel
+                  </>
+                )}
+              </button>
+            </form>
+
+            <p className="mt-5 text-center text-xs text-zinc-600">
+              Acesso restrito a barbeiros cadastrados
+            </p>
+          </div>
+        )}
+
+        {/* ── STEP: CHANGE PASSWORD ────────────────────────────────── */}
+        {step === "change-password" && (
+          <div className="px-8 pb-8 pt-7">
+            <div className="mb-6 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/30 shadow-lg">
+                <Lock className="h-6 w-6 text-amber-400" />
+              </div>
+              <h2 className="font-display text-xl font-bold text-white">Defina sua senha</h2>
+              <p className="mt-1.5 text-sm text-zinc-400 leading-snug">
+                Por segurança, crie uma senha pessoal antes de continuar.
+                <br />
+                <span className="text-xs text-zinc-600">Isso só é necessário uma vez.</span>
+              </p>
             </div>
 
-            {error && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-                {error}
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              {/* Nova senha */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Nova senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    required
+                    autoComplete="new-password"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    tabIndex={-1}
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#39ff14] px-4 py-3 text-sm font-bold text-black shadow-lg shadow-[#39ff14]/20 transition-all hover:bg-[#39ff14]/90 hover:shadow-[#39ff14]/30 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Entrando...
-                </>
-              ) : (
-                <>
-                  <User className="h-4 w-4" />
-                  Entrar no painel
-                </>
+              {/* Confirmar senha */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Confirmar nova senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repita a nova senha"
+                    required
+                    autoComplete="new-password"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-3 pr-11 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {changeError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                  {changeError}
+                </div>
               )}
-            </button>
-          </form>
 
-          <p className="mt-5 text-center text-xs text-zinc-600">
-            Acesso restrito a barbeiros cadastrados
-          </p>
-        </div>
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-3 text-sm font-bold text-black shadow-lg shadow-amber-500/20 transition-all hover:bg-amber-400 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95"
+              >
+                {changingPassword ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    Salvar nova senha
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Skip — mantém senha atual */}
+            <button
+              onClick={handleSkip}
+              className="mt-3 w-full text-center text-xs text-zinc-600 hover:text-zinc-400 transition-colors underline underline-offset-2"
+            >
+              Manter senha atual e entrar
+            </button>
+          </div>
+        )}
+
+        {/* ── STEP: DONE ───────────────────────────────────────────── */}
+        {step === "done" && (
+          <div className="px-8 pb-8 pt-7 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#39ff14]/10 border border-[#39ff14]/30 shadow-lg">
+              <CheckCircle2 className="h-8 w-8 text-[#39ff14]" />
+            </div>
+            <h2 className="font-display text-xl font-bold text-white">Senha definida!</h2>
+            <p className="mt-2 text-sm text-zinc-400">
+              Sua senha foi atualizada com sucesso.
+              <br />
+              Redirecionando para o painel...
+            </p>
+            <div className="mt-4 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-[#39ff14]" />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
