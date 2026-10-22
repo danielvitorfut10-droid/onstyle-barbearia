@@ -1,16 +1,22 @@
 {
-  "name": "Studio Blackout",
-  "short_name": "Blackout",
-  "description": "Agendamento online da Studio Blackout — barbearia premium.",
+  "name": "OnStyle Barbearia",
+  "short_name": "OnStyle",
+  "description": "Agendamento online da OnStyle Barbearia — barbearia premium.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0A0A",
   "theme_color": "#0A0A0A",
+  "orientation": "portrait",
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "48x48",
-      "type": "image/x-icon"
+      "src": "/logoonstyle.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logoonstyle.png",
+      "sizes": "512x512",
+      "type": "image/png"
     }
   ]
 }

@@ -8,7 +8,7 @@ import {
   Scripts,
   Link,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { BookingProvider } from "@/components/booking/booking-provider";
 import { SiteHeader } from "@/components/site/site-header";
@@ -136,7 +136,23 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function useServiceWorker() {
+  const registered = useRef(false);
+  useEffect(() => {
+    if (registered.current) return;
+    registered.current = true;
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/sw.js", { scope: "/" })
+        .catch(() => {
+          // SW registration failed silently — site still works
+        });
+    }
+  }, []);
+}
+
 function RootComponent() {
+  useServiceWorker();
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
