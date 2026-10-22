@@ -246,14 +246,14 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
   if (settings) {
     settings = {
       ...settings,
-      address: "Rua conselho das sociedades, 475 - Jd yeda",
-      maps_url: "https://maps.google.com/maps?q=Rua+conselho+das+sociedades,+475+-+Jd+yeda&t=&z=15&ie=UTF8&iwloc=&output=embed",
+      address: "Avenida Carlos Lacerda, 183",
+      maps_url: "https://maps.google.com/maps?q=Avenida+Carlos+Lacerda,+183,+Campinas&t=&z=15&ie=UTF8&iwloc=&output=embed",
     };
   } else {
     settings = {
       shop_name: "OnStyle Barbearia",
-      address: "Rua conselho das sociedades, 475 - Jd yeda",
-      maps_url: "https://maps.google.com/maps?q=Rua+conselho+das+sociedades,+475+-+Jd+yeda&t=&z=15&ie=UTF8&iwloc=&output=embed",
+      address: "Avenida Carlos Lacerda, 183",
+      maps_url: "https://maps.google.com/maps?q=Avenida+Carlos+Lacerda,+183,+Campinas&t=&z=15&ie=UTF8&iwloc=&output=embed",
       phone: "+55 19 98909-7315",
       whatsapp: "5519989097315",
       instagram: "",
