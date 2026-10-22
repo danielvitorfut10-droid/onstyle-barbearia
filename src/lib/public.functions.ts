@@ -17,8 +17,138 @@ const bookingSchema = z.object({
   time: z.string().regex(/^\d{2}:\d{2}$/),
   name: z.string().trim().min(2).max(80),
   phone: z.string().trim().min(10).max(20),
-  notes: z.string().trim().max(280).optional().or(z.literal("")),
+  notes: z.string().trim().max(500).optional().or(z.literal("")),
+  extraPriceCents: z.number().int().min(0).optional().default(0),
 });
+
+// ─── Serviços canônicos da OnStyle ───────────────────────────────────────────
+// sort_order define a ordem de exibição.
+// bookable = true  → aparece no modal de agendamento
+// bookable = false → apenas vitrine (seção de serviços do site)
+type CanonicalService = {
+  key: string;         // fragmento do nome para match (lowercase)
+  name: string;
+  description: string;
+  price_cents: number;
+  duration_min: number;
+  sort_order: number;
+  bookable: boolean;   // false = vitrine apenas
+};
+
+const CANONICAL_SERVICES: CanonicalService[] = [
+  {
+    key: "corte + barba",
+    name: "Corte + barba",
+    description: "Combo completo de corte e barba com acabamento em navalha.",
+    price_cents: 7000,
+    duration_min: 60,
+    sort_order: 1,
+    bookable: true,
+  },
+  {
+    key: "corte + barba + sobrancelha",
+    name: "Corte + barba + sobrancelha",
+    description: "Combo completo de corte, barba e sobrancelha.",
+    price_cents: 8500,
+    duration_min: 60,
+    sort_order: 2,
+    bookable: true,
+  },
+  {
+    key: "corte",
+    name: "Corte",
+    description: "Corte de cabelo completo com acabamento.",
+    price_cents: 4000,
+    duration_min: 60,
+    sort_order: 3,
+    bookable: true,
+  },
+  {
+    key: "barba",
+    name: "Barba",
+    description: "Barba com acabamento em navalha.",
+    price_cents: 3000,
+    duration_min: 60,
+    sort_order: 4,
+    bookable: true,
+  },
+  {
+    key: "luzes",
+    name: "Luzes",
+    description: "Coloração com técnica de luzes para um visual moderno e natural.",
+    price_cents: 6000,
+    duration_min: 60,
+    sort_order: 5,
+    bookable: true,
+  },
+  {
+    key: "platinado",
+    name: "Platinado",
+    description: "Descoloração completa para o visual platinado exclusivo.",
+    price_cents: 11000,
+    duration_min: 60,
+    sort_order: 6,
+    bookable: true,
+  },
+  {
+    key: "relaxamento",
+    name: "Relaxamento",
+    description: "Tratamento de relaxamento capilar para fios alinhados e macios.",
+    price_cents: 4000,
+    duration_min: 60,
+    sort_order: 7,
+    bookable: true,
+  },
+  {
+    key: "limpeza de pele",
+    name: "Limpeza de pele",
+    description: "Limpeza de pele profunda para uma pele saudável e renovada.",
+    price_cents: 2000,
+    duration_min: 60,
+    sort_order: 8,
+    bookable: true,
+  },
+  // ── Vitrine apenas (não aparecem no modal de agendamento) ──
+  {
+    key: "sobrancelha",
+    name: "Sobrancelha",
+    description: "Design e limpeza de sobrancelha com acabamento preciso.",
+    price_cents: 1500,
+    duration_min: 60,
+    sort_order: 9,
+    bookable: false,
+  },
+  {
+    key: "cavanhaque",
+    name: "Cavanhaque",
+    description: "Modelagem de cavanhaque com navalha e acabamento perfeito.",
+    price_cents: 1500,
+    duration_min: 60,
+    sort_order: 10,
+    bookable: false,
+  },
+  {
+    key: "pezinho",
+    name: "Pezinho",
+    description: "Acabamento no pezinho para manter o visual impecável entre cortes.",
+    price_cents: 2000,
+    duration_min: 60,
+    sort_order: 11,
+    bookable: false,
+  },
+];
+
+/**
+ * Encontra o canônico correto para um serviço pelo nome.
+ * Prioriza matches mais específicos (mais palavras) para evitar
+ * que "corte" sobrescreva "corte + barba".
+ */
+function findCanonical(name: string): CanonicalService | undefined {
+  const lower = name.toLowerCase();
+  // Ordena por especificidade (key mais longa primeiro)
+  const sorted = [...CANONICAL_SERVICES].sort((a, b) => b.key.length - a.key.length);
+  return sorted.find((c) => lower.includes(c.key));
+}
 
 export const getSiteData = createServerFn({ method: "GET" }).handler(async () => {
   const db = publicClient();
@@ -49,74 +179,69 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
   let services = servicesRes.data ?? [];
   let settings = settingsRes.data ?? null;
 
-  // Garantir a transformação/atualização em tempo de execução dos dados retornados
+  // Atualiza bios dos barbeiros ativos
   barbers = barbers.map((b) => {
-    if (b.name.toLowerCase().includes("rian")) {
+    const lower = b.name.toLowerCase();
+    if (lower.includes("gabriel")) {
       return {
         ...b,
-        bio: "Especialista em cortes modernos, tradicionais, degrades, acabamento em navalha, barba desenhada e cortes infantis",
+        bio: "Especialista em cortes modernos, degradês, acabamento em navalha, barba desenhada e cortes infantis.",
       };
     }
-    if (b.name.toLowerCase().includes("lemuel")) {
+    if (lower.includes("romario") || lower.includes("romário")) {
       return {
         ...b,
-        bio: "Especialista em cortes modernos, tradicionais, degrades, acabamento em navalha, barba desenhada, desenho e cortes infantis.",
+        bio: "Especialista em cortes modernos, tradicionais, degradês, acabamento em navalha, barba desenhada e desenho.",
       };
     }
     return b;
   });
 
-  // Serviços vêm direto do cadastro (mesmos dados usados no agendamento e no painel)
-  services = services.filter((s) => !s.name.toLowerCase().includes("cavanhaque"));
-
+  // Aplica os dados canônicos sobre os serviços do banco
   services = services.map((s) => {
-    if (s.name.toLowerCase() === "barba") {
+    const canonical = findCanonical(s.name);
+    if (canonical) {
       return {
         ...s,
-        price_cents: 3000,
-        description: "barba com acabamento em navalha",
-        sort_order: 4,
+        name: canonical.name,
+        description: canonical.description,
+        price_cents: canonical.price_cents,
+        duration_min: 60, // sempre 1h
+        sort_order: canonical.sort_order,
       };
     }
-    if (s.name.toLowerCase() === "corte + barba") {
-      return {
-        ...s,
-        price_cents: 6000,
-        sort_order: 5,
-      };
-    }
-    if (s.name.toLowerCase().includes("corte") && s.name.toLowerCase().includes("barba") && s.name.toLowerCase().includes("sobrancelha")) {
-      return {
-        ...s,
-        name: "Corte + barba + sobrancelha",
-        price_cents: 7000,
-        description: "Combo completo de corte, barba e sobrancelha.",
-        sort_order: 6,
-      };
-    }
-    return s;
+    return { ...s, duration_min: 60 };
   });
 
-  // Se o novo serviço ainda não estiver no array de serviços retornados do DB, inserimos
-  const hasCombo = services.some((s) =>
-    s.name.toLowerCase().includes("corte") &&
-    s.name.toLowerCase().includes("barba") &&
-    s.name.toLowerCase().includes("sobrancelha")
-  );
-
-  if (!hasCombo) {
-    services.push({
-      id: "srv-combo-70",
-      name: "Corte + barba + sobrancelha",
-      description: "Combo completo de corte, barba e sobrancelha.",
-      price_cents: 7000,
-      duration_min: 75,
-      sort_order: 6,
-    });
+  // Garante que todos os canônicos bookable existam (mesmo que não estejam no banco)
+  for (const canonical of CANONICAL_SERVICES) {
+    const already = services.some((s) => s.name.toLowerCase() === canonical.name.toLowerCase());
+    if (!already) {
+      services.push({
+        id: `srv-canonical-${canonical.sort_order}`,
+        name: canonical.name,
+        description: canonical.description,
+        price_cents: canonical.price_cents,
+        duration_min: 60,
+        sort_order: canonical.sort_order,
+      });
+    }
   }
 
-  // Ordenar serviços pelo sort_order
-  services.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  // Remove duplicatas (mantém o com ID real do banco)
+  const seen = new Map<string, typeof services[0]>();
+  for (const s of services) {
+    const key = s.name.toLowerCase();
+    const existing = seen.get(key);
+    // Prefere o com ID real (não começa com "srv-canonical-")
+    if (!existing || s.id.startsWith("srv-canonical-") === false) {
+      seen.set(key, s);
+    }
+  }
+  services = Array.from(seen.values());
+
+  // Ordena por sort_order
+  services.sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
 
   if (settings) {
     settings = {
@@ -126,13 +251,13 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
     };
   } else {
     settings = {
-      shop_name: "Studio Blackout",
+      shop_name: "OnStyle Barbearia",
       address: "Rua conselho das sociedades, 475 - Jd yeda",
       maps_url: "https://maps.google.com/maps?q=Rua+conselho+das+sociedades,+475+-+Jd+yeda&t=&z=15&ie=UTF8&iwloc=&output=embed",
-      phone: "+55 19 92003-7087",
-      whatsapp: "5519920037087",
-      instagram: "https://www.instagram.com/studio_._blackout/",
-      whatsapp_template: "Olá! Fiz um agendamento no Studio Blackout.",
+      phone: "+55 19 98909-7315",
+      whatsapp: "5519989097315",
+      instagram: "",
+      whatsapp_template: "Olá! Fiz um agendamento na OnStyle Barbearia.",
     };
   }
 
@@ -149,7 +274,7 @@ export const getAvailability = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = publicClient();
 
-    const [{ data: service }, { data: hour }, { data: settings }] = await Promise.all([
+    const [{ data: service }, { data: hour }] = await Promise.all([
       db
         .from("services")
         .select("duration_min")
@@ -160,7 +285,6 @@ export const getAvailability = createServerFn({ method: "POST" })
         .select("open_time, close_time, closed")
         .eq("weekday", weekdayOf(data.date))
         .maybeSingle(),
-      db.from("settings").select("slot_interval_min").eq("id", 1).maybeSingle(),
     ]);
 
     if (!service || !hour || hour.closed) return { slots: [] as { time: string; iso: string }[] };
@@ -182,7 +306,7 @@ export const getAvailability = createServerFn({ method: "POST" })
       openTime: String(hour.open_time).slice(0, 5),
       closeTime: String(hour.close_time).slice(0, 5),
       intervalMin: 60,
-      durationMin: service.duration_min,
+      durationMin: 60, // sempre 1 hora independente do serviço
       busy: toIntervals(busy),
       unblockedNightStarts,
     });
@@ -215,11 +339,24 @@ export const createBooking = createServerFn({ method: "POST" })
       if (error) console.error(error);
       return { ok: false as const, error: r.error ?? "Não foi possível concluir o agendamento. Tente novamente." };
     }
+
+    // If there is an addon service, update the price to include it
+    const extraCents = data.extraPriceCents ?? 0;
+    if (r.id && extraCents > 0) {
+      const basePriceCents = r.priceCents ?? 0;
+      const totalPriceCents = basePriceCents + extraCents;
+      await supabasePublic
+        .from("appointments")
+        .update({ price_cents: totalPriceCents })
+        .eq("id", r.id);
+    }
+
+    const finalPrice = (r.priceCents ?? 0) + (data.extraPriceCents ?? 0);
     return {
       ok: true as const,
       id: r.id ?? null,
       barberName: r.barberName ?? "",
       serviceName: r.serviceName ?? "",
-      priceCents: r.priceCents ?? 0,
+      priceCents: finalPrice,
     };
   });

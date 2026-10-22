@@ -8,7 +8,7 @@ export function buildWhatsappLink(input: {
   timeLabel: string;
   priceLabel: string;
 }) {
-  const base = input.template?.trim() || "Olá! Fiz um agendamento no Studio Blackout.";
+  const base = input.template?.trim() || "Olá! Fiz um agendamento na OnStyle Barbearia.";
   const message = [
     base,
     "",
@@ -21,16 +21,21 @@ export function buildWhatsappLink(input: {
   ].join("\n");
 
   const lowerBarber = (input.barberName || "").toLowerCase();
-  let targetNumber = input.whatsapp ? input.whatsapp.replace(/\D/g, "") : "";
+  let targetNumber = "";
 
   // Redirecionamento dinâmico baseado no barbeiro selecionado
-  if (lowerBarber.includes("rian")) {
-    targetNumber = "5519920037087";
-  } else if (lowerBarber.includes("lemuel") || lowerBarber.includes("lemoel")) {
-    targetNumber = "5519986078202";
-  } else if (targetNumber && !targetNumber.startsWith("55") && targetNumber.length <= 11) {
-    targetNumber = `55${targetNumber}`;
+  if (lowerBarber.includes("gabriel")) {
+    targetNumber = "5519989097315";
+  } else if (lowerBarber.includes("romario") || lowerBarber.includes("romário")) {
+    targetNumber = "5519992867103";
+  } else {
+    // Fallback: número informado nas configurações ou Romario
+    targetNumber = input.whatsapp ? input.whatsapp.replace(/\D/g, "") : "5519992867103";
+    if (targetNumber && !targetNumber.startsWith("55") && targetNumber.length <= 11) {
+      targetNumber = `55${targetNumber}`;
+    }
+    if (!targetNumber) targetNumber = "5519992867103";
   }
 
-  return `https://wa.me/${targetNumber || "5519920037087"}?text=${encodeURIComponent(message)}`;
+  return `https://wa.me/${targetNumber}?text=${encodeURIComponent(message)}`;
 }

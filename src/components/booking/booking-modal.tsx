@@ -9,8 +9,10 @@ import {
   Clock,
   Loader2,
   MessageCircle,
+  Plus,
   Scissors,
   User,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,14 +24,29 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { formatBRL, formatDateLong, formatDuration, getTodayDateKey, maskPhone, toDateKey } from "@/lib/format";
+import { formatBRL, formatDateLong, getTodayDateKey, maskPhone, toDateKey } from "@/lib/format";
 import { siteQueryOptions } from "@/lib/queries";
 import { getAvailability, createBooking } from "@/lib/public.functions";
 import { buildWhatsappLink } from "./whatsapp";
 
 const STEPS = ["Barbeiro", "Serviço", "Data", "Horário", "Dados", "Revisão"];
 
+// Serviços que podem ser adicionados como complemento (segundo serviço)
+const ADDON_SERVICE_KEYS = ["relaxamento", "limpeza de pele"];
+
+// Serviços apenas de vitrine (não agendáveis)
+const VITRINE_KEYS = ["sobrancelha", "cavanhaque", "pezinho"];
+
 type Props = { open: boolean; onOpenChange: (open: boolean) => void };
+
+type ServiceOption = {
+  id: string;
+  name: string;
+  description?: string | null;
+  price_cents: number;
+  duration_min: number;
+  sort_order?: number | null;
+};
 
 export function BookingModal({ open, onOpenChange }: Props) {
   const { data: site } = useQuery(siteQueryOptions);
@@ -38,7 +55,10 @@ export function BookingModal({ open, onOpenChange }: Props) {
 
   const [step, setStep] = useState(0);
   const [barberId, setBarberId] = useState<string | null>(null);
+  // Primary service (main selection)
   const [serviceId, setServiceId] = useState<string | null>(null);
+  // Optional add-on service (Relaxamento or Limpeza de pele)
+  const [addonServiceId, setAddonServiceId] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -48,6 +68,45 @@ export function BookingModal({ open, onOpenChange }: Props) {
 
   const barber = site?.barbers.find((b) => b.id === barberId) ?? null;
   const service = site?.services.find((s) => s.id === serviceId) ?? null;
+  const addonService = addonServiceId
+    ? (site?.services.find((s) => s.id === addonServiceId) ?? null)
+    : null;
+
+  // Total price = primary + optional addon
+  const totalPriceCents = (service?.price_cents ?? 0) + (addonService?.price_cents ?? 0);
+
+  // Combined display name
+  const combinedServiceName = addonService
+    ? `${service?.name} + ${addonService.name}`
+    : (service?.name ?? "");
+
+  // Bookable services (no vitrine-only ones)
+  const bookableServices = useMemo(
+    () =>
+      (site?.services ?? []).filter((s) => {
+        const lower = s.name.trim().toLowerCase();
+        return !VITRINE_KEYS.some((k) => lower === k);
+      }),
+    [site],
+  );
+
+  // Main services = bookable but NOT add-ons
+  const mainServices = useMemo(
+    () =>
+      bookableServices.filter(
+        (s) => !ADDON_SERVICE_KEYS.some((k) => s.name.trim().toLowerCase().includes(k)),
+      ),
+    [bookableServices],
+  );
+
+  // Add-on services
+  const addonServices = useMemo(
+    () =>
+      bookableServices.filter((s) =>
+        ADDON_SERVICE_KEYS.some((k) => s.name.trim().toLowerCase().includes(k)),
+      ),
+    [bookableServices],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -55,6 +114,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
         setStep(0);
         setBarberId(null);
         setServiceId(null);
+        setAddonServiceId(null);
         setDate(null);
         setTime(null);
         setName("");
@@ -74,16 +134,11 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const isDateDisabled = (d: Date) => {
     const dKey = toDateKey(d);
     const todayKey = getTodayDateKey();
-
     if (dKey < todayKey) return true;
-
     const maxDate = new Date();
     maxDate.setDate(maxDate.getDate() + 30);
-    const maxKey = toDateKey(maxDate);
-    if (dKey > maxKey) return true;
-
-    const weekday = d.getDay();
-    return closedWeekdays.has(weekday);
+    if (dKey > toDateKey(maxDate)) return true;
+    return closedWeekdays.has(d.getDay());
   };
 
   const slotsQuery = useQuery({
@@ -97,6 +152,16 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const nameValid = name.trim().length >= 2;
   const phoneValid = phoneDigits.length >= 10;
 
+  // Build notes: prepend addon info so the panel sees it
+  const buildFinalNotes = () => {
+    const parts: string[] = [];
+    if (addonService) {
+      parts.push(`[Serviço adicional: ${addonService.name} — ${formatBRL(addonService.price_cents)}]`);
+    }
+    if (notes.trim()) parts.push(notes.trim());
+    return parts.join("\n");
+  };
+
   const mutation = useMutation({
     mutationFn: () =>
       createFn({
@@ -107,7 +172,10 @@ export function BookingModal({ open, onOpenChange }: Props) {
           time: time!,
           name: name.trim(),
           phone,
-          notes: notes.trim(),
+          // Pass total price override via notes prefix; actual price override handled below
+          notes: buildFinalNotes(),
+          // Price override via extra field passed in notes for the RPC
+          extraPriceCents: addonService ? addonService.price_cents : 0,
         },
       }),
     onSuccess: (result) => {
@@ -123,10 +191,10 @@ export function BookingModal({ open, onOpenChange }: Props) {
         template: site?.settings?.whatsapp_template ?? null,
         clientName: name.trim(),
         barberName: result.barberName,
-        serviceName: result.serviceName,
+        serviceName: combinedServiceName,
         dateLabel: formatDateLong(date!),
         timeLabel: time!,
-        priceLabel: formatBRL(result.priceCents),
+        priceLabel: formatBRL(totalPriceCents),
       });
       setDone({ whatsappUrl: url });
       toast.success("Agendamento confirmado!");
@@ -141,9 +209,14 @@ export function BookingModal({ open, onOpenChange }: Props) {
     (step === 3 && time) ||
     (step === 4 && nameValid && phoneValid);
 
+  // Helper: toggle addon
+  const toggleAddon = (svc: ServiceOption) => {
+    setAddonServiceId((prev) => (prev === svc.id ? null : svc.id));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex flex-col h-[490px] sm:h-[530px] max-h-[85vh] w-[calc(100vw-2rem)] max-w-md sm:max-w-lg gap-0 overflow-hidden border-border bg-popover p-0 rounded-2xl shadow-2xl">
+      <DialogContent className="flex flex-col h-[490px] sm:h-[560px] max-h-[90vh] w-[calc(100vw-2rem)] max-w-md sm:max-w-lg gap-0 overflow-hidden border-border bg-popover p-0 rounded-2xl shadow-2xl">
         <div className="shrink-0 border-b border-border p-4 sm:p-5 bg-card/40">
           <DialogTitle className="font-display text-base sm:text-lg">
             {done ? "Agendamento confirmado" : "Agendar agora"}
@@ -170,10 +243,13 @@ export function BookingModal({ open, onOpenChange }: Props) {
               </div>
               <div className="space-y-1">
                 <p className="font-display text-base font-medium">
-                  {service?.name} com {barber?.name}
+                  {combinedServiceName} com {barber?.name}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {date && formatDateLong(date)} às {time}
+                </p>
+                <p className="text-sm font-semibold text-foreground">
+                  Total: {formatBRL(totalPriceCents)}
                 </p>
               </div>
               <div className="flex flex-col gap-2 pt-2">
@@ -190,6 +266,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
             </div>
           ) : (
             <>
+              {/* ── STEP 0: Barbeiro ─────────────────────── */}
               {step === 0 && (
                 <div className="flex flex-col gap-3">
                   {!site
@@ -228,47 +305,120 @@ export function BookingModal({ open, onOpenChange }: Props) {
                 </div>
               )}
 
+              {/* ── STEP 1: Serviço ──────────────────────── */}
               {step === 1 && (
-                <div className="flex flex-col gap-2.5">
-                  {(site?.services ?? [])
-                    .filter((s) => s.name.trim().toLowerCase() !== "sobrancelha")
-                    .map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setServiceId(s.id);
-                        setTime(null);
-                        setStep(2);
-                      }}
-                      className={cn(
-                        "flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3.5 sm:p-4 text-left transition-all hover:border-foreground/40 hover:bg-accent/60 w-full min-w-0",
-                        serviceId === s.id && "border-foreground bg-accent/80 ring-1 ring-foreground",
-                      )}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <span className="block font-display text-sm sm:text-base font-medium text-foreground truncate">
-                          {s.name}
-                        </span>
-                        <span className="block text-xs text-muted-foreground mt-0.5">
-                          {formatDuration(s.duration_min)}
-                        </span>
+                <div className="flex flex-col gap-2">
+                  {/* Main services */}
+                  <div className="flex flex-col gap-2">
+                    {mainServices.map((s) => {
+                      const selected = serviceId === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setServiceId(selected ? null : s.id);
+                            setTime(null);
+                          }}
+                          className={cn(
+                            "flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3.5 sm:p-4 text-left transition-all hover:border-foreground/40 hover:bg-accent/60 w-full min-w-0",
+                            selected && "border-foreground bg-accent/80 ring-1 ring-foreground",
+                          )}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <span className="block font-display text-sm sm:text-base font-medium text-foreground truncate">
+                              {s.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-display text-sm sm:text-base font-semibold text-foreground">
+                              {formatBRL(s.price_cents)}
+                            </span>
+                            {selected ? (
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background">
+                                <Check className="h-3 w-3" />
+                              </span>
+                            ) : (
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-border" />
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Add-on services section */}
+                  {addonServices.length > 0 && (
+                    <div className="mt-1">
+                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1 mb-2">
+                        + Adicionar ao agendamento (opcional)
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {addonServices.map((s) => {
+                          const selected = addonServiceId === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => toggleAddon(s)}
+                              className={cn(
+                                "flex items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card/60 p-3 text-left transition-all hover:border-foreground/40 hover:bg-accent/40 w-full min-w-0",
+                                selected && "border-foreground bg-accent/60 ring-1 ring-foreground border-solid",
+                              )}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {selected ? (
+                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                                    <X className="h-3 w-3" />
+                                  </span>
+                                ) : (
+                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
+                                    <Plus className="h-3 w-3" />
+                                  </span>
+                                )}
+                                <span className="font-display text-sm font-medium text-foreground truncate">
+                                  {s.name}
+                                </span>
+                              </div>
+                              <span className="font-display text-sm font-semibold text-foreground shrink-0">
+                                {formatBRL(s.price_cents)}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-display text-sm sm:text-base font-semibold text-foreground">
-                          {formatBRL(s.price_cents)}
-                        </span>
-                        {serviceId === s.id && (
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background">
-                            <Check className="h-3 w-3" />
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                    </div>
+                  )}
+
+                  {/* Total price summary when something is selected */}
+                  {serviceId && (
+                    <div className="mt-1 rounded-xl border border-border bg-secondary/30 p-3 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {addonService
+                          ? `${service?.name} + ${addonService.name}`
+                          : service?.name}
+                      </span>
+                      <span className="font-display text-sm font-bold text-foreground">
+                        {formatBRL(totalPriceCents)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Continue button for step 1 */}
+                  <Button
+                    className="mt-2 w-full"
+                    disabled={!serviceId}
+                    onClick={() => {
+                      setTime(null);
+                      setStep(2);
+                    }}
+                  >
+                    Continuar
+                  </Button>
                 </div>
               )}
 
+              {/* ── STEP 2: Data ─────────────────────────── */}
               {step === 2 && (
                 <div className="flex flex-col items-center justify-center space-y-3 py-1">
                   <Calendar
@@ -287,12 +437,16 @@ export function BookingModal({ open, onOpenChange }: Props) {
                   />
                   {date && (
                     <p className="text-xs text-center text-muted-foreground">
-                      Data selecionada: <span className="font-semibold text-foreground capitalize">{formatDateLong(date)}</span>
+                      Data selecionada:{" "}
+                      <span className="font-semibold text-foreground capitalize">
+                        {formatDateLong(date)}
+                      </span>
                     </p>
                   )}
                 </div>
               )}
 
+              {/* ── STEP 3: Horário ──────────────────────── */}
               {step === 3 && (
                 <div>
                   {slotsQuery.isLoading ? (
@@ -319,7 +473,8 @@ export function BookingModal({ open, onOpenChange }: Props) {
                           }}
                           className={cn(
                             "rounded-xl border border-border bg-card py-2.5 text-center text-sm font-medium transition-all hover:border-foreground/40",
-                            time === s.time && "border-foreground bg-secondary ring-1 ring-foreground font-semibold",
+                            time === s.time &&
+                              "border-foreground bg-secondary ring-1 ring-foreground font-semibold",
                           )}
                         >
                           {s.time}
@@ -330,10 +485,13 @@ export function BookingModal({ open, onOpenChange }: Props) {
                 </div>
               )}
 
+              {/* ── STEP 4: Dados ────────────────────────── */}
               {step === 4 && (
                 <div className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="booking-name" className="text-sm font-medium">Nome completo</Label>
+                    <Label htmlFor="booking-name" className="text-sm font-medium">
+                      Nome completo
+                    </Label>
                     <Input
                       id="booking-name"
                       value={name}
@@ -348,7 +506,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="booking-phone" className="text-sm font-medium">WhatsApp</Label>
+                    <Label htmlFor="booking-phone" className="text-sm font-medium">
+                      WhatsApp
+                    </Label>
                     <Input
                       id="booking-phone"
                       inputMode="tel"
@@ -363,7 +523,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="booking-notes" className="text-sm font-medium">Observações (opcional)</Label>
+                    <Label htmlFor="booking-notes" className="text-sm font-medium">
+                      Observações (opcional)
+                    </Label>
                     <Textarea
                       id="booking-notes"
                       value={notes}
@@ -376,13 +538,26 @@ export function BookingModal({ open, onOpenChange }: Props) {
                 </div>
               )}
 
+              {/* ── STEP 5: Revisão ──────────────────────── */}
               {step === 5 && (
                 <div className="space-y-2.5">
                   <ReviewRow icon={<User className="h-4 w-4" />} label="Barbeiro" value={barber?.name ?? ""} />
                   <ReviewRow
                     icon={<Scissors className="h-4 w-4" />}
                     label="Serviço"
-                    value={`${service?.name} • ${formatBRL(service?.price_cents ?? 0)}`}
+                    value={service?.name ?? ""}
+                  />
+                  {addonService && (
+                    <ReviewRow
+                      icon={<Plus className="h-4 w-4" />}
+                      label="Serviço adicional"
+                      value={addonService.name}
+                    />
+                  )}
+                  <ReviewRow
+                    icon={<Scissors className="h-4 w-4" />}
+                    label="Total"
+                    value={formatBRL(totalPriceCents)}
                   />
                   <ReviewRow
                     icon={<CalendarDays className="h-4 w-4" />}
@@ -409,15 +584,28 @@ export function BookingModal({ open, onOpenChange }: Props) {
               <ArrowLeft className="h-4 w-4" aria-hidden />
               Voltar
             </Button>
-            {step === 5 ? (
-              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="flex-1 sm:flex-initial">
-                {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
-                Confirmar agendamento
-              </Button>
-            ) : (
-              <Button onClick={() => setStep((s) => s + 1)} disabled={!canAdvance} className="min-w-[110px]">
-                Continuar
-              </Button>
+            {/* Step 1 has its own inline Continue button */}
+            {step !== 1 && (
+              <>
+                {step === 5 ? (
+                  <Button
+                    onClick={() => mutation.mutate()}
+                    disabled={mutation.isPending}
+                    className="flex-1 sm:flex-initial"
+                  >
+                    {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+                    Confirmar agendamento
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => setStep((s) => s + 1)}
+                    disabled={!canAdvance}
+                    className="min-w-[110px]"
+                  >
+                    Continuar
+                  </Button>
+                )}
+              </>
             )}
           </div>
         )}

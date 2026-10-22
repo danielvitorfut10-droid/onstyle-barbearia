@@ -38,9 +38,9 @@ export function SiteHeader() {
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4">
         <Link to="/" className="flex items-center">
           <img
-            src="/logo-black.png"
-            alt="Studio Blackout"
-            className="h-16 w-auto max-h-28 object-contain transition-all duration-300 sm:h-20 md:h-24 my-[-8px]"
+            src="/logoonstyle.png"
+            alt="On Style Barbearia"
+            className="h-10 w-auto max-h-16 object-contain transition-all duration-300 sm:h-12 md:h-14 my-0"
           />
         </Link>
 

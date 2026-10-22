@@ -39,8 +39,8 @@ export function useBarberAuth(): BarberAuthState & { signOut: () => Promise<void
 
       const userEmail = (user.email ?? "").toLowerCase();
       const isStaffEmail =
-        userEmail === "rianbueno2018@gmail.com" ||
-        userEmail === "barbosalemueltrabalho@gmail.com";
+        userEmail === "carmo.gabriel01@gmail.com" ||
+        userEmail === "romariodos530@gmail.com";
 
       let [{ data: roles }, { data: barberData }] = await Promise.all([
         supabase.from("user_roles").select("role").eq("user_id", user.id),
@@ -60,7 +60,10 @@ export function useBarberAuth(): BarberAuthState & { signOut: () => Promise<void
 
       // Se não encontrou o barbeiro pelo user_id, buscar por nome de acordo com o e-mail e fazer o vínculo
       if (!barberData && isStaffEmail) {
-        const searchTerm = userEmail.includes("lemuel") ? "Lemuel" : "Rian";
+        const searchTerm = userEmail.includes("gabriel") || userEmail.includes("carmo")
+          ? "Gabriel"
+          : "Romario";
+
         const { data: matchedBarber } = await supabase
           .from("barbers")
           .select("id, name, nickname, photo_url")

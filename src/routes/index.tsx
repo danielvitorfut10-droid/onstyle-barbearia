@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Clock, ExternalLink, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { useBooking } from "@/components/booking/booking-provider";
 import { siteQueryOptions } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/format";
@@ -40,11 +41,11 @@ function Home() {
       {/* SEÇÃO HERO */}
       <section className="relative min-h-[85vh] md:min-h-screen flex items-center justify-center isolate">
         {/* Imagem de Fundo Fixa (Efeito de revelação/site subindo no Mobile e Desktop) */}
-        <div className="fixed inset-0 -z-10 h-screen w-full pointer-events-none overflow-hidden">
+        <div className="fixed inset-0 -z-10 h-screen w-full pointer-events-none overflow-hidden bg-black">
           <img
-            src="/hero-bg.jpg"
+            src="/onstylefundo.jpeg"
             alt="Studio Blackout Barbearia"
-            className="w-full h-full object-cover object-center"
+            className="w-full h-full object-contain object-[center_20%] md:object-center"
             loading="eager"
             // @ts-ignore
             fetchPriority="high"
@@ -54,14 +55,20 @@ function Home() {
           <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/25 to-black/80" />
         </div>
 
-        <div className="relative mx-auto flex max-w-4xl flex-col items-center text-center px-4 py-32 md:py-44 z-10">
+        <div className="relative mx-auto flex max-w-4xl flex-col items-center text-center px-4 pt-[52vh] pb-12 md:pt-[62vh] md:pb-16 z-10">
           <h1 className="max-w-3xl font-display text-4xl font-extrabold leading-[1.1] tracking-tight md:text-6xl text-white drop-shadow-lg">
-            Seu corte, Sua experiência<br />Sem burocracia!
+            Seu estilo começa aqui.
           </h1>
           <div className="mt-8 flex justify-center">
-            <Button size="lg" onClick={openBooking} className="px-8 py-6 text-base font-semibold shadow-2xl">
+            <ShimmerButton
+              onClick={openBooking}
+              shimmerColor="#FF2020"
+              background="#000000"
+              borderRadius="100px"
+              className="px-10 py-4 text-base font-bold tracking-wide"
+            >
               Agendar agora
-            </Button>
+            </ShimmerButton>
           </div>
         </div>
       </section>
@@ -74,20 +81,26 @@ function Home() {
           {/* Título e Subtítulo Centralizados */}
           <div className="text-center mb-8">
             <span className="block text-sm font-semibold uppercase tracking-widest text-zinc-500 mb-1">
-              Conheça sobre o
+              Conheça um pouco sobre a
             </span>
             <h2 className="font-display text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-zinc-900">
-              Studio Blackout
+              OnStyle Barbearia
             </h2>
           </div>
 
           {/* Texto de Apresentação */}
           <div className="space-y-6 text-zinc-700 leading-relaxed text-base sm:text-lg text-left sm:text-justify">
             <p>
-              A barbearia Blackout, em Campinas é o lugar perfeito para os homens que buscam uma experiência única e elegante. Nós valorizamos cada detalhe, desde a escolha dos melhores produtos do mercado até a habilidade e sabedoria dos nossos profissionais. Nós acreditamos que um homem deve se sentir valorizado e homenageado, afinal, sua aparência é importante. É por isso que oferecemos serviços de corte de cabelo e barba.
+              A OnStyle, localizada em Campinas, é o destino ideal para homens que valorizam estilo, personalidade e um atendimento de qualidade. Mais do que oferecer cortes de cabelo e barba, nosso propósito é proporcionar uma experiência diferenciada, onde cada detalhe é pensado para garantir conforto, confiança e satisfação.
             </p>
             <p>
-              Aqui, você encontrará um ambiente acolhedor e confortável, onde poderá relaxar e desfrutar de uma cerveja gelada enquanto espera pelo seu horário. Nossos profissionais são altamente treinados e experientes, e estão sempre prontos para ajudá-lo a encontrar o estilo perfeito para você. Acima de tudo, queremos que você se sinta bem e satisfeito com o resultado.
+              Acreditamos que um bom visual vai muito além da aparência: ele transmite atitude, identidade e autoestima. Por isso, contamos com profissionais dedicados, que combinam técnica, experiência e atenção aos detalhes para entregar resultados que valorizam o estilo de cada cliente.
+            </p>
+            <p>
+              Na OnStyle, você encontra um ambiente acolhedor, moderno e preparado para tornar seu momento de cuidado pessoal ainda mais especial. Seja para renovar o visual, manter o corte em dia ou cuidar da barba, nosso compromisso é oferecer um atendimento personalizado e fazer com que você saia daqui se sentindo ainda mais confiante.
+            </p>
+            <p className="italic font-medium text-zinc-500">
+              Na OnStyle Barbearia, cada detalhe transforma seu estilo.
             </p>
           </div>
         </div>
