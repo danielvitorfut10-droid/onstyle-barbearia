@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Eye, EyeOff, Loader2, Scissors, Lock, CheckCircle2 } from "lucide-react";
+import { X, Eye, EyeOff, Loader2, Scissors, Lock, CheckCircle2, ShieldAlert } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRouter } from "@tanstack/react-router";
 
@@ -78,7 +78,7 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
         onClose();
         router.navigate({ to: "/painel" });
       } else {
-        // First login — ask to change password
+        // First login — MUST change password before accessing panel
         setStep("change-password");
         setLoading(false);
       }
@@ -128,12 +128,7 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
     }
   }
 
-  async function handleSkip() {
-    // Mark as changed (skip) and go to panel
-    await supabase.auth.updateUser({ data: { password_changed: true } });
-    onClose();
-    router.navigate({ to: "/painel" });
-  }
+  // (no skip — password change is mandatory)
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -256,13 +251,13 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
           <div className="px-8 pb-8 pt-7">
             <div className="mb-6 text-center">
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/30 shadow-lg">
-                <Lock className="h-6 w-6 text-amber-400" />
+                <ShieldAlert className="h-6 w-6 text-amber-400" />
               </div>
-              <h2 className="font-display text-xl font-bold text-white">Defina sua senha</h2>
+              <h2 className="font-display text-xl font-bold text-white">Crie sua senha</h2>
               <p className="mt-1.5 text-sm text-zinc-400 leading-snug">
-                Por segurança, crie uma senha pessoal antes de continuar.
+                Defina uma senha pessoal para acessar o painel.
                 <br />
-                <span className="text-xs text-zinc-600">Isso só é necessário uma vez.</span>
+                <span className="text-xs text-zinc-600">Obrigatório — feito apenas uma vez.</span>
               </p>
             </div>
 
@@ -344,13 +339,7 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
               </button>
             </form>
 
-            {/* Skip — mantém senha atual */}
-            <button
-              onClick={handleSkip}
-              className="mt-3 w-full text-center text-xs text-zinc-600 hover:text-zinc-400 transition-colors underline underline-offset-2"
-            >
-              Manter senha atual e entrar
-            </button>
+            {/* No skip option — changing password is mandatory */}
           </div>
         )}
 
@@ -360,11 +349,13 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#39ff14]/10 border border-[#39ff14]/30 shadow-lg">
               <CheckCircle2 className="h-8 w-8 text-[#39ff14]" />
             </div>
-            <h2 className="font-display text-xl font-bold text-white">Senha definida!</h2>
+            <h2 className="font-display text-xl font-bold text-white">Senha criada!</h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Sua senha foi atualizada com sucesso.
+              Sua senha foi definida com sucesso.
               <br />
-              Redirecionando para o painel...
+              Use-a nos próximos acessos.
+              <br />
+              <span className="text-xs text-zinc-600">Redirecionando para o painel...</span>
             </p>
             <div className="mt-4 flex justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-[#39ff14]" />
