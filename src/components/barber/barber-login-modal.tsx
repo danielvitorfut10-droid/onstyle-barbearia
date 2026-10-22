@@ -110,28 +110,19 @@ export function BarberLoginModal({ open, onClose }: BarberLoginModalProps) {
     setChangingPassword(true);
 
     try {
-      // Re-authenticate with current password before updating
-      const { error: reAuthError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password: currentPassword,
-      });
-
-      if (reAuthError) {
-        setChangeError("Senha atual incorreta. Verifique e tente novamente.");
-        setChangingPassword(false);
-        return;
-      }
-
-      // Update password
+      // Pass current_password directly in updateUser — required by Supabase
+      // when GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD is enabled.
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
+        current_password: currentPassword,
         data: { password_changed: true },
       });
 
       if (updateError) {
-        console.error("[ChangePassword] updateError:", updateError);
         const msg = updateError.message?.toLowerCase() ?? "";
-        if (msg.includes("same password") || msg.includes("different from the old password")) {
+        if (msg.includes("current_password") || msg.includes("current password")) {
+          setChangeError("Senha atual incorreta. Verifique e tente novamente.");
+        } else if (msg.includes("same password") || msg.includes("different from the old password")) {
           setChangeError("A nova senha não pode ser igual à senha atual. Escolha outra.");
         } else if (msg.includes("at least 6")) {
           setChangeError("A senha deve ter pelo menos 6 caracteres.");
