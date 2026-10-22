@@ -13,16 +13,16 @@ const WEEKDAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Studio Blackout — Barbearia premium com agendamento online" },
+      { title: "OnStyle Barbearia — Barbearia premium com agendamento online" },
       {
         name: "description",
         content:
-          "Agende seu corte na Studio Blackout em segundos. Barbeiros especialistas, ambiente reservado e horários confirmados na hora pelo WhatsApp.",
+          "Agende seu corte na OnStyle Barbearia em segundos. Barbeiros especialistas, ambiente reservado e horários confirmados na hora pelo WhatsApp.",
       },
-      { property: "og:title", content: "Studio Blackout — Barbearia premium com agendamento online" },
+      { property: "og:title", content: "OnStyle Barbearia — Barbearia premium com agendamento online" },
       {
         property: "og:description",
-        content: "Agende seu corte na Studio Blackout em segundos. Barbeiros especialistas, ambiente reservado e horários confirmados na hora pelo WhatsApp.",
+        content: "Agende seu corte na OnStyle Barbearia em segundos. Barbeiros especialistas, ambiente reservado e horários confirmados na hora pelo WhatsApp.",
       },
     ],
   }),
@@ -44,7 +44,7 @@ function Home() {
         <div className="fixed inset-0 -z-10 h-screen w-full pointer-events-none overflow-hidden bg-black">
           <img
             src="/onstylefundo.jpeg"
-            alt="Studio Blackout Barbearia"
+            alt="OnStyle Barbearia"
             className="w-full h-full object-contain object-[center_20%] md:object-center"
             loading="eager"
             // @ts-ignore
@@ -191,7 +191,7 @@ function Home() {
               {/* Mapa de Fundo Interativo (Google Maps Embed Claro) */}
               <div className="absolute inset-0 z-0 overflow-hidden">
                 <iframe
-                  title="Localização Studio Blackout no Mapa"
+                  title="Localização OnStyle Barbearia no Mapa"
                   width="100%"
                   height="100%"
                   className="w-full h-full border-0 opacity-90 transition-all duration-500 group-hover:opacity-100 group-hover:scale-105 pointer-events-none"
@@ -210,7 +210,7 @@ function Home() {
               <div className="relative z-20 p-5 flex items-center justify-between">
                 <div className="inline-flex items-center gap-2 rounded-full bg-zinc-900/90 backdrop-blur-md px-4 py-1.5 border border-zinc-700 text-xs font-semibold text-white shadow-lg">
                   <MapPin className="h-4 w-4 text-[#39ff14]" />
-                  <span>Studio Blackout</span>
+                  <span>OnStyle Barbearia</span>
                 </div>
                 <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900/90 backdrop-blur-md px-3 py-1 border border-zinc-700 text-[11px] font-bold text-[#39ff14]">
                   <span>Abrir GPS</span>

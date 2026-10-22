@@ -18,7 +18,7 @@ export function SiteFooter() {
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-12 md:grid-cols-2">
           <div className="space-y-3">
             <p className="font-display text-base font-extrabold uppercase tracking-[0.3em] text-white">
-              Studio <span className="text-zinc-400">Blackout</span>
+              OnStyle <span className="text-zinc-400">Barbearia</span>
             </p>
             <p className="max-w-xs text-sm text-zinc-400">
               Barbearia premium. Corte preciso, ambiente reservado e horário garantido.
@@ -86,7 +86,7 @@ export function SiteFooter() {
           </div>
         </div>
         <div className="border-t border-zinc-800/80 py-5 text-center text-xs text-zinc-500">
-          © {new Date().getFullYear()} Studio Blackout. Todos os direitos reservados.
+          © {new Date().getFullYear()} OnStyle Barbearia. Todos os direitos reservados.
         </div>
       </footer>
     </>

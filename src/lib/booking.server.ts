@@ -93,7 +93,7 @@ export function buildWhatsappMessage(input: {
   timeLabel: string;
   priceLabel: string;
 }) {
-  const base = input.template?.trim() || "Olá! Fiz um agendamento no Studio Blackout.";
+  const base = input.template?.trim() || "Olá! Fiz um agendamento na OnStyle Barbearia.";
   return [
     base,
     "",

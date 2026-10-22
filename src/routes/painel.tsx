@@ -67,7 +67,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/painel")({
   head: () => ({
-    meta: [{ title: "Painel do Barbeiro — Studio Blackout" }],
+    meta: [{ title: "Painel do Barbeiro — OnStyle Barbearia" }],
   }),
   component: PainelPage,
 });
@@ -190,7 +190,7 @@ function PainelPage() {
                 {initial}
               </div>
               <div className="hidden text-left sm:block">
-                <p className="text-[10px] text-zinc-500 leading-none">Studio Blackout</p>
+                <p className="text-[10px] text-zinc-500 leading-none">OnStyle Barbearia</p>
                 <p className="text-sm font-bold text-white leading-tight">{displayName}</p>
               </div>
               <ChevronDown
@@ -1855,7 +1855,7 @@ function ClientesTab({
             const rawDigits = appt.client_phone.replace(/\D/g, "");
             const fullPhone = rawDigits.startsWith("55") ? rawDigits : `55${rawDigits}`;
             const waMessage = encodeURIComponent(
-              `Olá ${appt.client_name}, referente ao seu agendamento no Studio Blackout para ${formattedDate} às ${formattedTime}:`
+              `Olá ${appt.client_name}, referente ao seu agendamento na OnStyle Barbearia para ${formattedDate} às ${formattedTime}:`
             );
             const waUrl = `https://wa.me/${fullPhone}?text=${waMessage}`;
 
