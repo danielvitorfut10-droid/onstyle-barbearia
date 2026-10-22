@@ -114,10 +114,10 @@ function Home() {
             <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-3">
               Tradição e qualidade
             </h2>
-            <div className="flex items-center justify-center gap-3 text-xs uppercase tracking-[0.25em] font-semibold text-[#39ff14]">
-              <span className="h-px w-8 bg-[#39ff14]/80" />
+            <div className="flex items-center justify-center gap-3 text-xs uppercase tracking-[0.25em] font-semibold text-red-500">
+              <span className="h-px w-8 bg-red-500/80" />
               <span>O QUE NÓS FAZEMOS</span>
-              <span className="h-px w-8 bg-[#39ff14]/80" />
+              <span className="h-px w-8 bg-red-500/80" />
             </div>
           </div>
 
@@ -128,15 +128,15 @@ function Home() {
               return (
                 <div
                   key={s.id}
-                  className="group relative flex flex-col items-center text-center p-8 rounded-2xl bg-zinc-950/90 border border-zinc-800/80 hover:border-[#39ff14]/40 hover:bg-zinc-900/80 transition-all duration-300 shadow-xl"
+                  className="group relative flex flex-col items-center text-center p-8 rounded-2xl bg-zinc-950/90 border border-zinc-800/80 hover:border-red-500/40 hover:bg-zinc-900/80 transition-all duration-300 shadow-xl"
                 >
                   {/* Ícone */}
-                  <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-white group-hover:scale-110 group-hover:bg-[#39ff14] group-hover:text-black transition-all duration-300">
+                  <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-white group-hover:scale-110 group-hover:bg-red-500 group-hover:text-white transition-all duration-300">
                     <ServiceIcon type={iconType} />
                   </div>
 
                   {/* Nome do Serviço */}
-                  <h3 className="font-display text-xl font-bold text-white mb-3 group-hover:text-[#39ff14] transition-colors">
+                  <h3 className="font-display text-xl font-bold text-white mb-3 group-hover:text-red-500 transition-colors">
                     {s.name}
                   </h3>
 
@@ -145,11 +145,8 @@ function Home() {
                     {desc}
                   </p>
 
-                  {/* Preço e Duração */}
-                  <div className="w-full pt-4 border-t border-zinc-800/80 flex items-center justify-between text-sm">
-                    <span className="text-xs font-medium text-zinc-500">
-                      {formatDuration(s.duration_min)}
-                    </span>
+                  {/* Preço */}
+                  <div className="w-full pt-4 border-t border-zinc-800/80 flex items-center justify-end text-sm">
                     <span className="font-display font-extrabold text-[#39ff14] text-base">
                       {formatBRL(s.price_cents)}
                     </span>
