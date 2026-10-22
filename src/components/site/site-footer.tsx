@@ -23,7 +23,7 @@ export function SiteFooter() {
             <p className="max-w-xs text-sm text-zinc-400">
               Barbearia premium. Corte preciso, ambiente reservado e horário garantido.
             </p>
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex items-center gap-3 pt-2" suppressHydrationWarning>
               {whatsappDigits && (
                 <a
                   href={`https://wa.me/${whatsappDigits}`}
