@@ -338,30 +338,52 @@ export const createBooking = createServerFn({ method: "POST" })
 
     // Resolve o serviceId: se for um ID canônico virtual (não-UUID), busca o serviço real pelo nome
     let resolvedServiceId = data.serviceId;
-    if (!data.serviceId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-      // É um ID canônico virtual — tenta descobrir que serviço é pelo sort_order embutido no ID
-      // Exemplo: "srv-canonical-3" → sort_order 3 → "Corte"
-      const { data: allServices } = await supabasePublic
-        .from("services")
-        .select("id, name, sort_order")
-        .eq("active", true)
-        .order("sort_order");
+    const isVirtualId = !data.serviceId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
-      // Extrai o número do canonical ID e tenta casar com sort_order ou nome via CANONICAL_SERVICES
+    if (isVirtualId) {
+      // É um ID canônico virtual — busca o serviço real pelo sort_order embutido no ID
+      // Exemplo: "srv-canonical-3" → sort_order 3 → "Corte"
       const canonicalOrder = parseInt(data.serviceId.replace("srv-canonical-", ""), 10);
       const canonical = CANONICAL_SERVICES.find((c) => c.sort_order === canonicalOrder);
 
-      if (canonical && allServices && allServices.length > 0) {
-        const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
+      // Busca TODOS os serviços (ativos e inativos) para ter o máximo de chance de encontrar
+      const { data: allServices, error: svcErr } = await supabasePublic
+        .from("services")
+        .select("id, name, sort_order, active")
+        .order("sort_order");
+
+      if (svcErr) {
+        console.error("[createBooking] Erro ao buscar serviços:", svcErr);
+      }
+
+      const activeServices = allServices?.filter((s) => s.active !== false) ?? [];
+      const anyServices = allServices ?? [];
+
+      // Função de normalização de nome para comparação
+      const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
+
+      if (canonical && activeServices.length > 0) {
+        // Tenta casar pelo nome normalizado primeiro (ativo)
         const match =
-          allServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
-          allServices[0];
+          activeServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
+          anyServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
+          activeServices[0];
         resolvedServiceId = match.id;
-      } else if (allServices && allServices.length > 0) {
-        // Fallback: usa o primeiro serviço ativo
-        resolvedServiceId = allServices[0].id;
+      } else if (canonical && anyServices.length > 0) {
+        // Serviços existem mas nenhum ativo — usa o que casar pelo nome
+        const match =
+          anyServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
+          anyServices[0];
+        resolvedServiceId = match.id;
+      } else if (activeServices.length > 0) {
+        // Não temos canonical mas tem serviços ativos — usa o primeiro
+        resolvedServiceId = activeServices[0].id;
+      } else if (anyServices.length > 0) {
+        resolvedServiceId = anyServices[0].id;
       } else {
-        return { ok: false as const, error: "Serviço não encontrado. Tente novamente." };
+        // Último recurso: tenta buscar sem filtros usando wildcard (ignora RLS)
+        console.error("[createBooking] Nenhum serviço encontrado na tabela services. Verifique as permissões RLS.");
+        return { ok: false as const, error: "Serviço não encontrado. Por favor, contate a barbearia." };
       }
     }
 
@@ -378,7 +400,7 @@ export const createBooking = createServerFn({ method: "POST" })
       ok?: boolean; error?: string; id?: string; barberName?: string; serviceName?: string; priceCents?: number;
     };
     if (error || !r.ok) {
-      if (error) console.error(error);
+      if (error) console.error("[createBooking] RPC error:", error);
       return { ok: false as const, error: r.error ?? "Não foi possível concluir o agendamento. Tente novamente." };
     }
 
@@ -402,3 +424,4 @@ export const createBooking = createServerFn({ method: "POST" })
       priceCents: finalPrice,
     };
   });
+
