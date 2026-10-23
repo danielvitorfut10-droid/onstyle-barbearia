@@ -616,12 +616,18 @@ function ReceitaTab({
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard
           label="Receita Líquida"
           value={formatBRL(netTotalCents)}
           icon={<DollarSign className="h-5 w-5" />}
           accent
+        />
+        <SummaryCard
+          label="Faturamento Bruto"
+          value={formatBRL(rawTotalCents)}
+          icon={<TrendingUp className="h-5 w-5" />}
+          accent2
         />
         <SummaryCard
           label="Atendimentos"
@@ -631,7 +637,7 @@ function ReceitaTab({
         <SummaryCard
           label="Receita do Dia"
           value={formatBRL(netTodayCents)}
-          icon={<TrendingUp className="h-5 w-5" />}
+          icon={<BarChart3 className="h-5 w-5" />}
         />
       </div>
 
@@ -714,29 +720,39 @@ function SummaryCard({
   value,
   icon,
   accent,
+  accent2,
 }: {
   label: string;
   value: string;
   icon: React.ReactNode;
   accent?: boolean;
+  accent2?: boolean;
 }) {
   return (
     <div
       className={`rounded-2xl border p-4 sm:p-6 ${
         accent
           ? "border-[#39ff14]/20 bg-[#39ff14]/5"
+          : accent2
+          ? "border-blue-400/20 bg-blue-400/5"
           : "border-zinc-800 bg-zinc-900/50"
       }`}
     >
       <div
         className={`mb-2 flex h-8 w-8 items-center justify-center rounded-xl sm:mb-3 sm:h-10 sm:w-10 ${
-          accent ? "bg-[#39ff14]/15 text-[#39ff14]" : "bg-zinc-800 text-zinc-400"
+          accent
+            ? "bg-[#39ff14]/15 text-[#39ff14]"
+            : accent2
+            ? "bg-blue-400/15 text-blue-400"
+            : "bg-zinc-800 text-zinc-400"
         }`}
       >
         {icon}
       </div>
       <p className="text-[10px] text-zinc-500 uppercase tracking-wide sm:text-xs">{label}</p>
-      <p className={`mt-1 text-lg font-bold sm:text-2xl ${accent ? "text-[#39ff14]" : "text-white"}`}>{value}</p>
+      <p className={`mt-1 text-lg font-bold sm:text-2xl ${
+        accent ? "text-[#39ff14]" : accent2 ? "text-blue-400" : "text-white"
+      }`}>{value}</p>
     </div>
   );
 }
@@ -2287,6 +2303,14 @@ function AddAppointmentModal({
   const [time, setTime] = useState(format(new Date(), "HH:mm"));
   const [notes, setNotes] = useState("");
 
+  // Monthly plan: up to 4 sessions
+  const [session2Date, setSession2Date] = useState("");
+  const [session2Time, setSession2Time] = useState("");
+  const [session3Date, setSession3Date] = useState("");
+  const [session3Time, setSession3Time] = useState("");
+  const [session4Date, setSession4Date] = useState("");
+  const [session4Time, setSession4Time] = useState("");
+
   // Busca TODOS os serviços do banco (ativos e inativos) sem filtro
   // para garantir que todos aparecem no painel admin
   const { data: dbServices = [], isLoading: servicesLoading } = useQuery({
@@ -2359,6 +2383,40 @@ function AddAppointmentModal({
     }
   };
 
+  // Helper: insert one session appointment
+  async function insertSession(
+    bId: string,
+    targetServiceId: string,
+    duration: number,
+    sessionDate: string,
+    sessionTime: string,
+    priceCents: number,
+    baseNotes: string,
+    sessionLabel: string
+  ) {
+    if (!sessionDate) return; // optional sessions
+    const hhmm = (sessionTime || "12:00").slice(0, 5);
+    const startDate = new Date(`${sessionDate}T${hhmm}:00-03:00`);
+    if (Number.isNaN(startDate.getTime())) throw new Error(`Horário inválido na ${sessionLabel}.`);
+    const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+    const { error } = await supabase.from("appointments").insert({
+      barber_id: bId,
+      service_id: targetServiceId,
+      client_name: clientName.trim(),
+      client_phone: clientPhone.trim() || "(19) 00000-0000",
+      starts_at: startDate.toISOString(),
+      ends_at: endDate.toISOString(),
+      price_cents: priceCents,
+      status: "concluido",
+      notes: baseNotes ? `[Corte Mensal - ${sessionLabel}] ${baseNotes}` : `Corte Mensal (Plano Mensal - ${sessionLabel})`,
+    });
+    if (error) {
+      if (error.code === "23P01" || error.code === "23505")
+        throw new Error(`Conflito de horário na ${sessionLabel}. Escolha outro horário.`);
+      throw new Error(`Erro ao salvar ${sessionLabel}: ${error.message}`);
+    }
+  }
+
   const addMutation = useMutation({
     mutationFn: async () => {
       if (!clientName.trim()) throw new Error("Informe o nome do cliente.");
@@ -2414,7 +2472,21 @@ function AddAppointmentModal({
       const priceCents =
         Number.isNaN(parsedVal) || parsedVal < 0 ? 0 : Math.round(parsedVal * 100);
 
-      // Processa data e hora
+      const finalNotes = notes.trim();
+
+      // ── CORTE MENSAL: insert up to 4 sessions ──
+      if (serviceId === "corte_mensal") {
+        if (!date) throw new Error("Informe a data da 1ª sessão.");
+        // Session 1 (required)
+        await insertSession(bId, targetServiceId, duration, date, time, priceCents, finalNotes, "1ª sessão");
+        // Sessions 2-4 (optional, only if date filled)
+        if (session2Date) await insertSession(bId, targetServiceId, duration, session2Date, session2Time, 0, finalNotes, "2ª sessão");
+        if (session3Date) await insertSession(bId, targetServiceId, duration, session3Date, session3Time, 0, finalNotes, "3ª sessão");
+        if (session4Date) await insertSession(bId, targetServiceId, duration, session4Date, session4Time, 0, finalNotes, "4ª sessão");
+        return;
+      }
+
+      // ── REGULAR SERVICE ──
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
         throw new Error("Data inválida. Use o formato correto.");
       const hhmm = (time || "12:00").slice(0, 5);
@@ -2441,14 +2513,8 @@ function AddAppointmentModal({
       }
 
       // Monta notes finais
-      let finalNotes = notes.trim();
-      if (serviceId === "corte_mensal") {
-        finalNotes = finalNotes
-          ? `[Corte Mensal] ${finalNotes}`
-          : "Corte Mensal (Plano Mensal)";
-      } else if (!finalNotes) {
-        finalNotes = "Atendimento balcão (Adicionado no painel)";
-      }
+      let finalNotesFull = finalNotes;
+      if (!finalNotesFull) finalNotesFull = "Atendimento balcão (Adicionado no painel)";
 
       // Insere o agendamento
       const { error } = await supabase.from("appointments").insert({
@@ -2460,7 +2526,7 @@ function AddAppointmentModal({
         ends_at: endDate.toISOString(),
         price_cents: priceCents,
         status: "concluido",
-        notes: finalNotes,
+        notes: finalNotesFull,
       });
 
       if (error) {
@@ -2611,28 +2677,127 @@ function AddAppointmentModal({
             )}
           </div>
 
-          {/* Data e Hora */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-zinc-300 mb-1">Data *</label>
-              <input
-                type="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
-              />
+          {/* Data e Hora — para Corte Mensal: 4 sessões */}
+          {isCorteMenusal ? (
+            <div className="space-y-3">
+              {/* Session 1 (required) */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#39ff14] text-black text-[10px] font-extrabold shrink-0">1</span>
+                  <label className="font-semibold text-[#39ff14] text-xs">1ª sessão do mês</label>
+                  <span className="ml-auto text-[10px] text-zinc-500">Data *</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    required
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                  <input
+                    type="time"
+                    value={time}
+                    onChange={(e) => setTime(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Session 2 (optional) */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-extrabold shrink-0">2</span>
+                  <label className="font-semibold text-zinc-400 text-xs">2ª sessão do mês <span className="text-zinc-600">(Opcional)</span></label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={session2Date}
+                    onChange={(e) => setSession2Date(e.target.value)}
+                    placeholder="dd/mm/aaaa"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                  <input
+                    type="time"
+                    value={session2Time}
+                    onChange={(e) => setSession2Time(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Session 3 (optional) */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-extrabold shrink-0">3</span>
+                  <label className="font-semibold text-zinc-400 text-xs">3ª sessão do mês <span className="text-zinc-600">(Opcional)</span></label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={session3Date}
+                    onChange={(e) => setSession3Date(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                  <input
+                    type="time"
+                    value={session3Time}
+                    onChange={(e) => setSession3Time(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Session 4 (optional) */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-extrabold shrink-0">4</span>
+                  <label className="font-semibold text-zinc-400 text-xs">4ª sessão do mês <span className="text-zinc-600">(Opcional)</span></label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={session4Date}
+                    onChange={(e) => setSession4Date(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                  <input
+                    type="time"
+                    value={session4Time}
+                    onChange={(e) => setSession4Time(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-[#39ff14]/50 focus:outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-[#39ff14]/70 pt-1">
+                ✔ Preencha apenas as sessões que já aconteceram. Cada uma será um registro separado e poderá ser editada individualmente.
+              </p>
             </div>
-            <div>
-              <label className="block font-semibold text-zinc-300 mb-1">Horário (Opcional)</label>
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
-              />
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-zinc-300 mb-1">Data *</label>
+                <input
+                  type="date"
+                  required
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-zinc-300 mb-1">Horário (Opcional)</label>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-white focus:border-emerald-500/50 focus:outline-none"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Observação */}
           <div>
