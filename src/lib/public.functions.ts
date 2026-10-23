@@ -230,13 +230,15 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
     }
   }
 
-  // Remove duplicatas (mantém o com ID real do banco)
+  // Remove duplicatas — ID real do banco sempre tem prioridade sobre ID canônico virtual
   const seen = new Map<string, typeof services[0]>();
   for (const s of services) {
     const key = s.name.toLowerCase();
     const existing = seen.get(key);
-    // Prefere o com ID real (não começa com "srv-canonical-")
-    if (!existing || s.id.startsWith("srv-canonical-") === false) {
+    const currentIsVirtual = s.id.startsWith("srv-canonical-");
+    const existingIsVirtual = existing?.id.startsWith("srv-canonical-") ?? true;
+    // Aceita o novo elemento se: não há existente, ou o existente é virtual e o novo é real
+    if (!existing || (existingIsVirtual && !currentIsVirtual)) {
       seen.set(key, s);
     }
   }
@@ -349,59 +351,96 @@ export const createBooking = createServerFn({ method: "POST" })
     const activeServices = allServices?.filter((s) => s.active !== false) ?? [];
     const anyServices = allServices ?? [];
 
-    // Normalização de nome para comparação sem acentos/espaços
+    // Normalização de nome para comparação sem acentos/espaços extras
     const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
 
     // ── 2. Resolve o serviceId para um registro real do banco ────────────────
-    const isVirtualId = !data.serviceId.match(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const isRealUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      data.serviceId
     );
 
-    let resolvedService: { id: string; name: string; price_cents: number; duration_min: number } | undefined;
+    type ResolvedSvc = { id: string; name: string; price_cents: number; duration_min: number };
+    let resolvedService: ResolvedSvc | undefined;
 
-    if (isVirtualId) {
+    if (!isRealUuid) {
       // ID canônico virtual: "srv-canonical-3" → sort_order 3
       const canonicalOrder = parseInt(data.serviceId.replace("srv-canonical-", ""), 10);
       const canonical = CANONICAL_SERVICES.find((c) => c.sort_order === canonicalOrder);
       console.log("[createBooking] ID virtual:", data.serviceId, "→ canonical:", canonical?.name);
 
       if (canonical) {
-        const found =
+        // Tenta encontrar o serviço real no banco pelo nome
+        const dbFound =
           activeServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
           anyServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
           activeServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key))) ??
           anyServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key)));
 
-        if (found) {
-          resolvedService = found;
+        if (dbFound) {
+          resolvedService = dbFound;
+        } else if (activeServices.length > 0) {
+          // Serviço canônico não existe no banco — usa primeiro ativo como FK, aplica dados canônicos
+          resolvedService = {
+            ...activeServices[0],
+            name: canonical.name,
+            price_cents: canonical.price_cents,
+            duration_min: canonical.duration_min,
+          };
+          console.warn("[createBooking] Serviço canônico ausente no banco — FK fallback:", activeServices[0].id);
+        } else if (anyServices.length > 0) {
+          resolvedService = {
+            ...anyServices[0],
+            name: canonical.name,
+            price_cents: canonical.price_cents,
+            duration_min: canonical.duration_min,
+          };
+          console.warn("[createBooking] Usando serviço inativo como FK fallback:", anyServices[0].id);
         } else {
-          // Serviço não existe no banco mas temos os dados canônicos —
-          // usa o primeiro serviço ativo como FK válida e aplica preço canônico
-          const fallback = activeServices[0] ?? anyServices[0];
-          if (fallback) {
-            resolvedService = {
-              ...fallback,
-              name: canonical.name,
-              price_cents: canonical.price_cents,
-              duration_min: canonical.duration_min,
-            };
-            console.warn("[createBooking] Serviço canônico ausente no banco — usando FK fallback:", fallback.id);
-          }
+          // Banco vazio ou RLS bloqueando tudo — usa dados canônicos puros.
+          // O INSERT vai falhar de FK se não houver serviço real, mas pelo menos
+          // reportamos um erro claro de agendamento (não de "serviço não encontrado").
+          // Neste cenário, a migration SQL precisa ser executada no Supabase.
+          console.error("[createBooking] Banco de serviços vazio/inacessível via anon. Migration necessária.");
+          return {
+            ok: false as const,
+            error: "Não foi possível concluir o agendamento. Por favor, tente novamente em alguns instantes.",
+          };
         }
       } else {
+        // ID virtual mas sem canônico correspondente → usa primeiro disponível
         resolvedService = activeServices[0] ?? anyServices[0];
+        if (!resolvedService) {
+          console.error("[createBooking] Nenhum serviço disponível — banco vazio.");
+          return {
+            ok: false as const,
+            error: "Não foi possível concluir o agendamento. Por favor, tente novamente em alguns instantes.",
+          };
+        }
       }
     } else {
-      // UUID real: tenta encontrar no banco, usa fallback se não encontrar
-      resolvedService =
-        anyServices.find((s) => s.id === data.serviceId) ??
-        activeServices[0] ??
-        anyServices[0];
+      // UUID real: tenta encontrar no banco pelo ID exato
+      const byId = anyServices.find((s) => s.id === data.serviceId);
+      if (byId) {
+        resolvedService = byId;
+      } else if (anyServices.length > 0) {
+        // UUID não encontrado mas há outros serviços — fallback
+        resolvedService = activeServices[0] ?? anyServices[0];
+        console.warn("[createBooking] UUID", data.serviceId, "não encontrado no banco — usando fallback:", resolvedService.id);
+      } else {
+        console.error("[createBooking] Banco de serviços vazio para UUID:", data.serviceId);
+        return {
+          ok: false as const,
+          error: "Não foi possível concluir o agendamento. Por favor, tente novamente em alguns instantes.",
+        };
+      }
     }
 
     if (!resolvedService) {
-      console.error("[createBooking] Nenhum serviço disponível no banco.");
-      return { ok: false as const, error: "Serviço não encontrado. Por favor, contate a barbearia." };
+      console.error("[createBooking] resolvedService ainda undefined — não deveria chegar aqui.");
+      return {
+        ok: false as const,
+        error: "Não foi possível concluir o agendamento. Por favor, tente novamente em alguns instantes.",
+      };
     }
 
     console.log("[createBooking] Serviço resolvido:", resolvedService.id, resolvedService.name);
