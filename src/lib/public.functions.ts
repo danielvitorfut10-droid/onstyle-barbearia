@@ -336,92 +336,140 @@ export const createBooking = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Escolha um horário futuro." };
     }
 
-    // Resolve o serviceId: se for um ID canônico virtual (não-UUID), busca o serviço real pelo nome
-    let resolvedServiceId = data.serviceId;
-    const isVirtualId = !data.serviceId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    // ── 1. Busca TODOS os serviços do banco (ativos e inativos) ─────────────
+    const { data: allServices, error: svcListErr } = await supabasePublic
+      .from("services")
+      .select("id, name, price_cents, duration_min, sort_order, active")
+      .order("sort_order");
+
+    if (svcListErr) {
+      console.error("[createBooking] Erro ao buscar serviços:", svcListErr);
+    }
+
+    const activeServices = allServices?.filter((s) => s.active !== false) ?? [];
+    const anyServices = allServices ?? [];
+
+    // Normalização de nome para comparação sem acentos/espaços
+    const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
+
+    // ── 2. Resolve o serviceId para um registro real do banco ────────────────
+    const isVirtualId = !data.serviceId.match(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+
+    let resolvedService: { id: string; name: string; price_cents: number; duration_min: number } | undefined;
 
     if (isVirtualId) {
-      // É um ID canônico virtual — busca o serviço real pelo sort_order embutido no ID
-      // Exemplo: "srv-canonical-3" → sort_order 3 → "Corte"
+      // ID canônico virtual: "srv-canonical-3" → sort_order 3
       const canonicalOrder = parseInt(data.serviceId.replace("srv-canonical-", ""), 10);
       const canonical = CANONICAL_SERVICES.find((c) => c.sort_order === canonicalOrder);
+      console.log("[createBooking] ID virtual:", data.serviceId, "→ canonical:", canonical?.name);
 
-      // Busca TODOS os serviços (ativos e inativos) para ter o máximo de chance de encontrar
-      const { data: allServices, error: svcErr } = await supabasePublic
-        .from("services")
-        .select("id, name, sort_order, active")
-        .order("sort_order");
-
-      if (svcErr) {
-        console.error("[createBooking] Erro ao buscar serviços:", svcErr);
-      }
-
-      const activeServices = allServices?.filter((s) => s.active !== false) ?? [];
-      const anyServices = allServices ?? [];
-
-      // Função de normalização de nome para comparação
-      const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
-
-      if (canonical && activeServices.length > 0) {
-        // Tenta casar pelo nome normalizado primeiro (ativo)
-        const match =
+      if (canonical) {
+        const found =
           activeServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
           anyServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
-          activeServices[0];
-        resolvedServiceId = match.id;
-      } else if (canonical && anyServices.length > 0) {
-        // Serviços existem mas nenhum ativo — usa o que casar pelo nome
-        const match =
-          anyServices.find((s) => nameNorm(s.name) === nameNorm(canonical.name)) ??
-          anyServices[0];
-        resolvedServiceId = match.id;
-      } else if (activeServices.length > 0) {
-        // Não temos canonical mas tem serviços ativos — usa o primeiro
-        resolvedServiceId = activeServices[0].id;
-      } else if (anyServices.length > 0) {
-        resolvedServiceId = anyServices[0].id;
+          activeServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key))) ??
+          anyServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key)));
+
+        if (found) {
+          resolvedService = found;
+        } else {
+          // Serviço não existe no banco mas temos os dados canônicos —
+          // usa o primeiro serviço ativo como FK válida e aplica preço canônico
+          const fallback = activeServices[0] ?? anyServices[0];
+          if (fallback) {
+            resolvedService = {
+              ...fallback,
+              name: canonical.name,
+              price_cents: canonical.price_cents,
+              duration_min: canonical.duration_min,
+            };
+            console.warn("[createBooking] Serviço canônico ausente no banco — usando FK fallback:", fallback.id);
+          }
+        }
       } else {
-        // Último recurso: tenta buscar sem filtros usando wildcard (ignora RLS)
-        console.error("[createBooking] Nenhum serviço encontrado na tabela services. Verifique as permissões RLS.");
-        return { ok: false as const, error: "Serviço não encontrado. Por favor, contate a barbearia." };
+        resolvedService = activeServices[0] ?? anyServices[0];
       }
+    } else {
+      // UUID real: tenta encontrar no banco, usa fallback se não encontrar
+      resolvedService =
+        anyServices.find((s) => s.id === data.serviceId) ??
+        activeServices[0] ??
+        anyServices[0];
     }
 
-    const { data: res, error } = await supabasePublic.rpc("create_public_booking", {
-      _barber_id: data.barberId,
-      _service_id: resolvedServiceId,
-      _starts_at: startsAt.toISOString(),
-      _name: data.name,
-      _phone: data.phone,
-      _notes: data.notes || "",
-      _label: `${data.date} ${data.time}`,
-    });
-    const r = (res ?? {}) as {
-      ok?: boolean; error?: string; id?: string; barberName?: string; serviceName?: string; priceCents?: number;
-    };
-    if (error || !r.ok) {
-      if (error) console.error("[createBooking] RPC error:", error);
-      return { ok: false as const, error: r.error ?? "Não foi possível concluir o agendamento. Tente novamente." };
+    if (!resolvedService) {
+      console.error("[createBooking] Nenhum serviço disponível no banco.");
+      return { ok: false as const, error: "Serviço não encontrado. Por favor, contate a barbearia." };
     }
 
-    // If there is an addon service, update the price to include it
+    console.log("[createBooking] Serviço resolvido:", resolvedService.id, resolvedService.name);
+
+    // ── 3. Busca o barbeiro ──────────────────────────────────────────────────
+    const { data: barberRow, error: barberErr } = await supabasePublic
+      .from("barbers")
+      .select("id, name")
+      .eq("id", data.barberId)
+      .maybeSingle();
+
+    if (barberErr || !barberRow) {
+      console.error("[createBooking] Barbeiro não encontrado:", data.barberId, barberErr);
+      return { ok: false as const, error: "Barbeiro não encontrado." };
+    }
+
+    // ── 4. Calcula ends_at ───────────────────────────────────────────────────
+    const durationMin = resolvedService.duration_min ?? 60;
+    const endsAt = new Date(startsAt.getTime() + durationMin * 60 * 1000);
+
+    // ── 5. Verifica conflitos de agenda ──────────────────────────────────────
+    const { data: conflicts } = await supabasePublic
+      .from("appointments")
+      .select("id")
+      .eq("barber_id", data.barberId)
+      .not("status", "in", '("cancelado","nao_compareceu")')
+      .lt("starts_at", endsAt.toISOString())
+      .gt("ends_at", startsAt.toISOString());
+
+    if (conflicts && conflicts.length > 0) {
+      return { ok: false as const, error: "Este horário já está ocupado. Escolha outro." };
+    }
+
+    // ── 6. Preço final (serviço + addon opcional) ────────────────────────────
+    const basePriceCents = resolvedService.price_cents ?? 0;
     const extraCents = data.extraPriceCents ?? 0;
-    if (r.id && extraCents > 0) {
-      const basePriceCents = r.priceCents ?? 0;
-      const totalPriceCents = basePriceCents + extraCents;
-      await supabasePublic
-        .from("appointments")
-        .update({ price_cents: totalPriceCents })
-        .eq("id", r.id);
+    const totalPriceCents = basePriceCents + extraCents;
+
+    // ── 7. Insere o agendamento diretamente (sem usar RPC) ───────────────────
+    const { data: inserted, error: insertErr } = await supabasePublic
+      .from("appointments")
+      .insert({
+        barber_id: data.barberId,
+        service_id: resolvedService.id,
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        client_name: data.name,
+        client_phone: data.phone,
+        notes: data.notes || "",
+        price_cents: totalPriceCents,
+        status: "agendado",
+      })
+      .select("id")
+      .single();
+
+    if (insertErr || !inserted) {
+      console.error("[createBooking] Erro ao inserir agendamento:", insertErr);
+      return { ok: false as const, error: "Não foi possível concluir o agendamento. Tente novamente." };
     }
 
-    const finalPrice = (r.priceCents ?? 0) + (data.extraPriceCents ?? 0);
+    console.log("[createBooking] Agendamento criado com sucesso:", inserted.id);
+
     return {
       ok: true as const,
-      id: r.id ?? null,
-      barberName: r.barberName ?? "",
-      serviceName: r.serviceName ?? "",
-      priceCents: finalPrice,
+      id: inserted.id,
+      barberName: barberRow.name,
+      serviceName: resolvedService.name,
+      priceCents: totalPriceCents,
     };
   });
 
