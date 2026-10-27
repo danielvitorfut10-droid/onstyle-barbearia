@@ -186,10 +186,11 @@ export function BookingModal({ open, onOpenChange }: Props) {
           time: time!,
           name: name.trim(),
           phone,
-          // Pass total price override via notes prefix; actual price override handled below
           notes: buildFinalNotes(),
-          // Price override via extra field passed in notes for the RPC
-          extraPriceCents: addonService ? addonService.price_cents : 0,
+          // Addon extra cents — irrelevant when mensalista (server zeroes price anyway)
+          extraPriceCents: (!isMensalista && addonService) ? addonService.price_cents : 0,
+          // Mensalista flag: server will update price_cents to 0 after booking creation
+          isMensalista,
         },
       }),
     onSuccess: (result) => {
