@@ -460,13 +460,29 @@ export const createBooking = createServerFn({ method: "POST" })
 
     console.log("[createBooking] Chamando RPC — service_id:", rpcServiceId, "label:", rpcLabel);
 
-    // ── 4. Chama o RPC create_public_booking (SECURITY DEFINER) ─────────────
-    // SECURITY DEFINER bypassa RLS — resolve serviço pelo UUID ou pelo _label.
-    // Valida serviço ativo, barbeiro ativo, conflito atômico de horário.
+    // ── 4. Monta _notes injetando [MENSALISTA] quando aplicável ─────────────
+    // O RPC create_public_booking detecta [MENSALISTA] em _notes e grava
+    // price_cents = 0 diretamente na criação — não é necessário nenhum UPDATE
+    // posterior para o caso mensalista.
     const isMensalista = data.isMensalista ?? false;
     const startsAtIso = startsAt.toISOString();
-    const finalNotes = data.notes?.trim() ?? "";
 
+    // Constrói as partes das notas em ordem:
+    //   1. Tag [MENSALISTA] (se aplicável)
+    //   2. Observações livres do cliente (se houver)
+    // O tag é adicionado UMA única vez; o conteúdo total é truncado a 500 chars
+    // (limite do schema) mas o front-end já limita a 280.
+    const rawNotes = data.notes?.trim() ?? "";
+    const noteParts: string[] = [];
+    if (isMensalista) noteParts.push("[MENSALISTA — serviço sem cobrança]");
+    if (rawNotes) noteParts.push(rawNotes);
+    const finalNotes = noteParts.join("\n").slice(0, 500);
+
+    // ── 5. Chama o RPC create_public_booking (SECURITY DEFINER) ─────────────
+    // SECURITY DEFINER bypassa RLS — resolve serviço pelo UUID ou pelo _label.
+    // Valida serviço ativo, barbeiro ativo, conflito atômico de horário.
+    // Quando _notes contém [MENSALISTA], o RPC grava price_cents = 0 e retorna
+    // priceCents = 0 no JSON resultante.
     const { data: rpcResult, error: rpcErr } = await supabasePublic.rpc("create_public_booking", {
       _barber_id:  data.barberId,
       _service_id: rpcServiceId,
@@ -497,41 +513,35 @@ export const createBooking = createServerFn({ method: "POST" })
       return { ok: false as const, error: result.error ?? "Não foi possível concluir o agendamento." };
     }
 
-    // ── 5. Preço final ───────────────────────────────────────────────────────
-    // Mensalista tem prioridade absoluta: preço sempre 0
+    // ── 6. Preço final ───────────────────────────────────────────────────────
+    // Usa comparação explícita com null/undefined para preservar zero do RPC:
+    //   • Mensalista: RPC retorna priceCents = 0 → usamos 0 (não somamos addon)
+    //   • Não mensalista: priceCents do RPC (preço do serviço) + extraCents (addon)
+    // NUNCA chamamos set_appointment_price nem UPDATE posterior para mensalista;
+    // o preço zero já está gravado pelo RPC na criação.
     const extraCents = isMensalista ? 0 : (data.extraPriceCents ?? 0);
-    const basePriceCents = result.priceCents ?? clientPriceCents ?? 0;
+
+    // result.priceCents pode ser 0 (mensalista) — não usar ?? aqui para não
+    // substituir zero por clientPriceCents.
+    const basePriceCents = result.priceCents != null ? result.priceCents : (clientPriceCents ?? 0);
     const totalPriceCents = isMensalista ? 0 : basePriceCents + extraCents;
 
-    // Atualiza o price_cents no banco em dois casos:
-    //   a) mensalista → zera o valor (price_cents = 0)
-    //   b) addon      → soma o valor adicional
-    // Usa o RPC set_appointment_price com SECURITY DEFINER para garantir que o
-    // UPDATE sempre funcionará, mesmo que a RLS bloqueie updates diretos de anon.
-    if (result.id && (isMensalista || extraCents > 0)) {
-      // Tenta primeiro via RPC SECURITY DEFINER (bypassa RLS)
+    // Addon (serviço adicional para não-mensalistas): atualiza price_cents
+    // somando o valor extra do addon ao preço base do serviço.
+    if (!isMensalista && result.id && extraCents > 0) {
+      const addonTotal = basePriceCents + extraCents;
       const { error: rpcPriceErr } = await supabasePublic.rpc("set_appointment_price", {
         _appointment_id: result.id,
-        _price_cents: totalPriceCents,
+        _price_cents: addonTotal,
       });
       if (rpcPriceErr) {
-        // Fallback: tenta UPDATE direto
-        console.warn("[createBooking] RPC set_appointment_price falhou:", rpcPriceErr.message, "— tentando UPDATE direto");
-        const { error: updErr } = await supabasePublic
-          .from("appointments")
-          .update({ price_cents: totalPriceCents })
-          .eq("id", result.id);
-        if (updErr) {
-          console.warn("[createBooking] UPDATE price_cents direto também falhou:", updErr.message);
-        } else {
-          console.log("[createBooking] price_cents atualizado via UPDATE direto para:", totalPriceCents);
-        }
+        console.warn("[createBooking] set_appointment_price (addon) falhou:", rpcPriceErr.message);
       } else {
-        console.log("[createBooking] price_cents atualizado via RPC para:", totalPriceCents, isMensalista ? "(mensalista)" : "(addon)");
+        console.log("[createBooking] price_cents addon atualizado para:", addonTotal);
       }
     }
 
-    console.log("[createBooking] Agendamento criado:", result.id, "barbeiro:", result.barberName, "serviço:", result.serviceName);
+    console.log("[createBooking] Agendamento criado:", result.id, "barbeiro:", result.barberName, "serviço:", result.serviceName, "price_cents:", totalPriceCents);
 
     return {
       ok: true as const,

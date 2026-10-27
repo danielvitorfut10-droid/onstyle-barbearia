@@ -163,12 +163,11 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const nameValid = name.trim().length >= 2;
   const phoneValid = phoneDigits.length >= 10;
 
-  // Build notes: prepend addon info so the panel sees it
+  // Build notes: prepend addon info so the panel sees it.
+  // NOTE: [MENSALISTA] tag NOT added here — the server injects it based on
+  // the isMensalista flag to avoid any duplication.
   const buildFinalNotes = () => {
     const parts: string[] = [];
-    if (isMensalista) {
-      parts.push(`[MENSALISTA — serviço sem cobrança]`);
-    }
     if (addonService) {
       parts.push(`[Serviço adicional: ${addonService.name} — ${formatBRL(addonService.price_cents)}]`);
     }
@@ -187,9 +186,8 @@ export function BookingModal({ open, onOpenChange }: Props) {
           name: name.trim(),
           phone,
           notes: buildFinalNotes(),
-          // Addon extra cents — irrelevant when mensalista (server zeroes price anyway)
           extraPriceCents: (!isMensalista && addonService) ? addonService.price_cents : 0,
-          // Mensalista flag: server will update price_cents to 0 after booking creation
+          // Server injects [MENSALISTA] in _notes and records price_cents = 0 at creation
           isMensalista,
         },
       }),
