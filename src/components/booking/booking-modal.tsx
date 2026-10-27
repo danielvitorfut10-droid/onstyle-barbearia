@@ -68,7 +68,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
-  const [done, setDone] = useState<{ whatsappUrl: string } | null>(null);
+  const [done, setDone] = useState<{ whatsappUrl: string; serviceName: string; barberName: string; priceCents: number } | null>(null);
 
   const barber = site?.barbers.find((b) => b.id === barberId) ?? null;
   const service = site?.services.find((s) => s.id === serviceId) ?? null;
@@ -163,18 +163,6 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const nameValid = name.trim().length >= 2;
   const phoneValid = phoneDigits.length >= 10;
 
-  // Build notes: prepend addon info so the panel sees it.
-  // NOTE: [MENSALISTA] tag NOT added here — the server injects it based on
-  // the isMensalista flag to avoid any duplication.
-  const buildFinalNotes = () => {
-    const parts: string[] = [];
-    if (addonService) {
-      parts.push(`[Serviço adicional: ${addonService.name} — ${formatBRL(addonService.price_cents)}]`);
-    }
-    if (notes.trim()) parts.push(notes.trim());
-    return parts.join("\n");
-  };
-
   const mutation = useMutation({
     mutationFn: () =>
       createFn({
@@ -185,8 +173,8 @@ export function BookingModal({ open, onOpenChange }: Props) {
           time: time!,
           name: name.trim(),
           phone,
-          notes: buildFinalNotes(),
-          extraPriceCents: (!isMensalista && addonService) ? addonService.price_cents : 0,
+          notes: notes.trim(),
+          addonServiceId,
           // Server injects [MENSALISTA] in _notes and records price_cents = 0 at creation
           isMensalista,
         },
@@ -204,12 +192,12 @@ export function BookingModal({ open, onOpenChange }: Props) {
         template: site?.settings?.whatsapp_template ?? null,
         clientName: name.trim(),
         barberName: result.barberName,
-        serviceName: combinedServiceName,
+        serviceName: result.serviceName,
         dateLabel: formatDateLong(date!),
         timeLabel: time!,
-        priceLabel: formatBRL(totalPriceCents),
+        priceLabel: formatBRL(result.priceCents),
       });
-      setDone({ whatsappUrl: url });
+      setDone({ whatsappUrl: url, serviceName: result.serviceName, barberName: result.barberName, priceCents: result.priceCents });
       toast.success("Agendamento confirmado!");
     },
     onError: () => toast.error("Falha de conexão. Tente novamente."),
@@ -256,13 +244,13 @@ export function BookingModal({ open, onOpenChange }: Props) {
               </div>
               <div className="space-y-1">
                 <p className="font-display text-base font-medium">
-                  {combinedServiceName} com {barber?.name}
+                  {done.serviceName} com {done.barberName}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {date && formatDateLong(date)} às {time}
                 </p>
                 <p className="text-sm font-semibold text-foreground">
-                  Total: {formatBRL(totalPriceCents)}
+                  Total: {formatBRL(done.priceCents)}
                 </p>
               </div>
               <div className="flex flex-col gap-2 pt-2">
@@ -285,36 +273,37 @@ export function BookingModal({ open, onOpenChange }: Props) {
                   {!site
                     ? [0, 1].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)
                     : site.barbers.map((b) => (
-                        <button
-                          key={b.id}
-                          type="button"
-                          onClick={() => {
-                            setBarberId(b.id);
-                            setStep(1);
-                          }}
-                          className={cn(
-                            "flex items-center gap-3 sm:gap-4 rounded-xl border border-border bg-card p-3.5 sm:p-4 text-left transition-all hover:border-foreground/40 hover:bg-accent/60 w-full min-w-0",
-                            barberId === b.id && "border-foreground bg-accent/80 ring-1 ring-foreground",
-                          )}
-                        >
-                          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-lg font-bold">
-                            {b.name.charAt(0)}
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => {
+                          setBarberId(b.id);
+                          setTime(null);
+                          setStep(1);
+                        }}
+                        className={cn(
+                          "flex items-center gap-3 sm:gap-4 rounded-xl border border-border bg-card p-3.5 sm:p-4 text-left transition-all hover:border-foreground/40 hover:bg-accent/60 w-full min-w-0",
+                          barberId === b.id && "border-foreground bg-accent/80 ring-1 ring-foreground",
+                        )}
+                      >
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-lg font-bold">
+                          {b.name.charAt(0)}
+                        </span>
+                        <span className="flex-1 min-w-0 overflow-hidden">
+                          <span className="block font-display text-sm sm:text-base font-semibold text-foreground truncate">
+                            {b.name}
                           </span>
-                          <span className="flex-1 min-w-0 overflow-hidden">
-                            <span className="block font-display text-sm sm:text-base font-semibold text-foreground truncate">
-                              {b.name}
-                            </span>
-                            <span className="block text-xs text-muted-foreground leading-relaxed whitespace-normal break-words line-clamp-2 mt-0.5">
-                              {b.bio}
-                            </span>
+                          <span className="block text-xs text-muted-foreground leading-relaxed whitespace-normal break-words line-clamp-2 mt-0.5">
+                            {b.bio}
                           </span>
-                          {barberId === b.id && (
-                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                              <Check className="h-3.5 w-3.5" />
-                            </span>
-                          )}
-                        </button>
-                      ))}
+                        </span>
+                        {barberId === b.id && (
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                            <Check className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </button>
+                    ))}
                 </div>
               )}
 
@@ -552,7 +541,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
                           className={cn(
                             "rounded-xl border border-border bg-card py-2.5 text-center text-sm font-medium transition-all hover:border-foreground/40",
                             time === s.time &&
-                              "border-foreground bg-secondary ring-1 ring-foreground font-semibold",
+                            "border-foreground bg-secondary ring-1 ring-foreground font-semibold",
                           )}
                         >
                           {s.time}
@@ -607,7 +596,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
                     <Textarea
                       id="booking-notes"
                       value={notes}
-                      maxLength={280}
+                      maxLength={200}
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Alguma preferência?"
                       className="w-full min-h-[80px] resize-none"

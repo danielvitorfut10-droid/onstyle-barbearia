@@ -101,6 +101,13 @@ interface Appointment {
   barbers?: { name: string } | null;
 }
 
+
+function appointmentServiceLabel(appt: { services?: { name: string } | null; notes?: string | null }) {
+  const base = appt.services?.name ?? "Serviço";
+  const extra = appt.notes?.match(/\[Serviço adicional:\s*([^\]]+)\]/i)?.[1];
+  return extra ? `${base} + ${extra.replace(/\s+—\s+R\$.*$/, "").trim()}` : base;
+}
+
 interface BlockedSlot {
   id: string;
   starts_at: string;
@@ -194,9 +201,8 @@ function PainelPage() {
                 <p className="text-sm font-bold text-white leading-tight">{displayName}</p>
               </div>
               <ChevronDown
-                className={`h-4 w-4 text-zinc-400 transition-transform ${
-                  userMenuOpen ? "rotate-180 text-[#39ff14]" : ""
-                }`}
+                className={`h-4 w-4 text-zinc-400 transition-transform ${userMenuOpen ? "rotate-180 text-[#39ff14]" : ""
+                  }`}
               />
             </button>
 
@@ -318,11 +324,10 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${
-        active
+      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${active
           ? "bg-[#39ff14]/10 text-[#39ff14] border border-[#39ff14]/30"
           : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
-      }`}
+        }`}
     >
       {children}
     </button>
@@ -399,11 +404,10 @@ function MiniCalendarPicker({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ${
-          open
+        className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ${open
             ? "border-[#39ff14]/50 bg-[#39ff14]/10 text-[#39ff14]"
             : "border-zinc-700 bg-zinc-900/50 text-zinc-300 hover:border-zinc-500 hover:text-white"
-        }`}
+          }`}
       >
         <Calendar className="h-3.5 w-3.5" />
         <span>{formatRange(value)}</span>
@@ -467,8 +471,7 @@ function MiniCalendarPicker({
                 <button
                   key={day.toISOString()}
                   onClick={() => handleDayClick(day)}
-                  className={`rounded-lg py-1.5 text-[11px] font-semibold transition-all ${
-                    !inMonth
+                  className={`rounded-lg py-1.5 text-[11px] font-semibold transition-all ${!inMonth
                       ? "text-zinc-700"
                       : isFrom || isTo || isSelectingFrom
                         ? "bg-[#39ff14] text-black shadow-sm shadow-[#39ff14]/30"
@@ -477,7 +480,7 @@ function MiniCalendarPicker({
                           : today
                             ? "text-[#39ff14] font-bold"
                             : "text-zinc-300 hover:bg-zinc-700/60"
-                  }`}
+                    }`}
                 >
                   {format(day, "d")}
                 </button>
@@ -523,7 +526,7 @@ function ReceitaTab({
     queryFn: async () => {
       let q = supabase
         .from("appointments")
-        .select("id, client_name, client_phone, starts_at, ends_at, price_cents, status, services(name)")
+        .select("id, client_name, client_phone, starts_at, ends_at, price_cents, status, notes, services(name)")
         .neq("status", "cancelado")
         .order("starts_at", { ascending: false });
 
@@ -697,7 +700,7 @@ function ReceitaTab({
                   <div>
                     <p className="text-sm font-semibold text-white">{a.client_name}</p>
                     <p className="text-xs text-zinc-500">
-                      {a.services?.name} •{" "}
+                      {appointmentServiceLabel(a)} •{" "}
                       {format(parseISO(a.starts_at), "dd/MM HH:mm")}
                     </p>
                   </div>
@@ -730,29 +733,26 @@ function SummaryCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border p-4 sm:p-6 ${
-        accent
+      className={`rounded-2xl border p-4 sm:p-6 ${accent
           ? "border-[#39ff14]/20 bg-[#39ff14]/5"
           : accent2
-          ? "border-blue-400/20 bg-blue-400/5"
-          : "border-zinc-800 bg-zinc-900/50"
-      }`}
+            ? "border-blue-400/20 bg-blue-400/5"
+            : "border-zinc-800 bg-zinc-900/50"
+        }`}
     >
       <div
-        className={`mb-2 flex h-8 w-8 items-center justify-center rounded-xl sm:mb-3 sm:h-10 sm:w-10 ${
-          accent
+        className={`mb-2 flex h-8 w-8 items-center justify-center rounded-xl sm:mb-3 sm:h-10 sm:w-10 ${accent
             ? "bg-[#39ff14]/15 text-[#39ff14]"
             : accent2
-            ? "bg-blue-400/15 text-blue-400"
-            : "bg-zinc-800 text-zinc-400"
-        }`}
+              ? "bg-blue-400/15 text-blue-400"
+              : "bg-zinc-800 text-zinc-400"
+          }`}
       >
         {icon}
       </div>
       <p className="text-[10px] text-zinc-500 uppercase tracking-wide sm:text-xs">{label}</p>
-      <p className={`mt-1 text-lg font-bold sm:text-2xl ${
-        accent ? "text-[#39ff14]" : accent2 ? "text-blue-400" : "text-white"
-      }`}>{value}</p>
+      <p className={`mt-1 text-lg font-bold sm:text-2xl ${accent ? "text-[#39ff14]" : accent2 ? "text-blue-400" : "text-white"
+        }`}>{value}</p>
     </div>
   );
 }
@@ -1263,7 +1263,7 @@ function AgendamentosTab({
     queryFn: async () => {
       let q = supabase
         .from("appointments")
-        .select("id, starts_at, ends_at, client_name, status, services(name)")
+        .select("id, starts_at, ends_at, client_name, status, notes, services(name)")
         .neq("status", "cancelado")
         .gte("starts_at", monthStart.toISOString())
         .lt("starts_at", monthEnd.toISOString());
@@ -1457,15 +1457,14 @@ function AgendamentosTab({
                 <button
                   key={day.toISOString()}
                   onClick={() => setSelectedDay(day)}
-                  className={`relative flex flex-col items-center gap-0.5 rounded-xl py-2 text-sm font-medium transition-all ${
-                    !isCurrentMonth
+                  className={`relative flex flex-col items-center gap-0.5 rounded-xl py-2 text-sm font-medium transition-all ${!isCurrentMonth
                       ? "text-zinc-700 hover:bg-zinc-800/30"
                       : isSelected
                         ? "bg-[#39ff14] text-black shadow-lg shadow-[#39ff14]/20"
                         : today
                           ? "border border-[#39ff14]/40 bg-[#39ff14]/5 text-[#39ff14]"
                           : "text-zinc-300 hover:bg-zinc-800/60"
-                  }`}
+                    }`}
                 >
                   <span>{format(day, "d")}</span>
                   {/* Dots */}
@@ -1561,7 +1560,7 @@ function AgendamentosTab({
                                 </div>
                               </div>
                               <span className="text-[10px] text-zinc-500 truncate max-w-[80px]">
-                                {(appt as any).services?.name}
+                                {appointmentServiceLabel(appt as any)}
                               </span>
                             </div>
                           );
@@ -1771,7 +1770,7 @@ function ClientesTab({
       search.trim() === "" ||
       a.client_name.toLowerCase().includes(search.toLowerCase()) ||
       a.client_phone.includes(search) ||
-      (a.services?.name ?? "").toLowerCase().includes(search.toLowerCase());
+      appointmentServiceLabel(a).toLowerCase().includes(search.toLowerCase());
 
     const matchesStatus =
       statusFilter === "todos" || a.status === statusFilter;
@@ -1842,11 +1841,10 @@ function ClientesTab({
             <button
               key={s.id}
               onClick={() => setStatusFilter(s.id)}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                statusFilter === s.id
+              className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${statusFilter === s.id
                   ? "bg-[#39ff14] text-black shadow-sm"
                   : "text-zinc-400 hover:text-white"
-              }`}
+                }`}
             >
               {s.label}
             </button>
@@ -1885,11 +1883,10 @@ function ClientesTab({
             return (
               <div
                 key={appt.id}
-                className={`relative flex flex-col justify-between rounded-2xl border p-5 transition-all ${
-                  isCanceled
+                className={`relative flex flex-col justify-between rounded-2xl border p-5 transition-all ${isCanceled
                     ? "border-red-500/20 bg-red-500/5 opacity-70"
                     : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
-                }`}
+                  }`}
               >
                 <div>
                   {/* Card Header: Name + Status */}
@@ -1906,19 +1903,19 @@ function ClientesTab({
 
                   {/* Booking Details Box */}
                   {(() => {
-                    const isMensalistaAppt = !!(appt.notes?.includes("[MENSALISTA") || appt.notes?.includes("MENSALISTA"));
+                    const isMensalistaAppt = /\[MENSALISTA(?:\]|\s)/i.test(appt.notes ?? "");
                     // Remove a tag interna das notes para exibição ao usuário
                     const cleanNotes = appt.notes
                       ? appt.notes
-                          .replace(/\[MENSALISTA[^\]]*\]/gi, "")
-                          .replace(/\[Serviço adicional:[^\]]*\]/gi, "")
-                          .trim()
+                        .replace(/\[MENSALISTA[^\]]*\]/gi, "")
+                        .replace(/\[Serviço adicional:[^\]]*\]/gi, "")
+                        .trim()
                       : null;
                     return (
                       <div className="space-y-2 rounded-xl bg-zinc-950/60 p-3 text-xs border border-zinc-800/80 mb-4">
                         <div className="flex justify-between items-center">
                           <span className="text-zinc-500">Serviço:</span>
-                          <span className="font-semibold text-white">{appt.services?.name ?? "Serviço"}</span>
+                          <span className="font-semibold text-white">{appointmentServiceLabel(appt)}</span>
                         </div>
 
                         {isMensalistaAppt && (
@@ -2026,7 +2023,7 @@ function ClientesTab({
 
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs space-y-1.5">
               <p><strong className="text-zinc-400">Cliente:</strong> <span className="text-white font-bold">{cancelModalAppt.client_name}</span></p>
-              <p><strong className="text-zinc-400">Serviço:</strong> <span className="text-white">{cancelModalAppt.services?.name}</span></p>
+              <p><strong className="text-zinc-400">Serviço:</strong> <span className="text-white">{appointmentServiceLabel(cancelModalAppt)}</span></p>
               <p><strong className="text-zinc-400">Horário:</strong> <span className="text-[#39ff14] font-bold">{format(parseISO(cancelModalAppt.starts_at), "dd/MM/yyyy 'às' HH:mm")}</span></p>
               <p><strong className="text-zinc-400">Valor a descontar:</strong> <span className="text-white font-bold">{formatBRL(cancelModalAppt.price_cents)}</span></p>
             </div>
@@ -2183,11 +2180,10 @@ function EditAppointmentModal({
                   key={s.id}
                   type="button"
                   onClick={() => handleServiceSelect(s.id)}
-                  className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-                    selectedServiceId === s.id
+                  className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${selectedServiceId === s.id
                       ? "border-[#39ff14] bg-[#39ff14]/10 text-white font-bold"
                       : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700"
-                  }`}
+                    }`}
                 >
                   <span>{s.name}</span>
                   <span className="text-zinc-500 font-normal">{formatBRL(s.price_cents)}</span>
@@ -2198,11 +2194,10 @@ function EditAppointmentModal({
               <button
                 type="button"
                 onClick={() => handleServiceSelect("corte_mensal")}
-                className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-                  selectedServiceId === "corte_mensal"
+                className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${selectedServiceId === "corte_mensal"
                     ? "border-[#39ff14] bg-[#39ff14]/10 text-white font-bold"
                     : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700"
-                }`}
+                  }`}
               >
                 <span className="flex items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 text-[#39ff14]" />
@@ -2215,11 +2210,10 @@ function EditAppointmentModal({
               <button
                 type="button"
                 onClick={() => handleServiceSelect("personalizado")}
-                className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-                  selectedServiceId === "personalizado"
+                className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${selectedServiceId === "personalizado"
                     ? "border-[#39ff14] bg-[#39ff14]/10 text-white font-bold"
                     : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700"
-                }`}
+                  }`}
               >
                 <span className="flex items-center gap-1.5">
                   <Scissors className="h-3.5 w-3.5 text-[#39ff14]" />
@@ -2288,18 +2282,18 @@ function EditAppointmentModal({
 // Serviços estáticos de fallback (caso o Supabase retorne vazio)
 // ─────────────────────────────────────────────
 const STATIC_SERVICES = [
-  { id: "static_corte",           name: "Corte",                       price_cents: 4000, duration_min: 60 },
-  { id: "static_barba",           name: "Barba",                       price_cents: 3000, duration_min: 60 },
-  { id: "static_corte_barba",     name: "Corte + Barba",               price_cents: 7000, duration_min: 60 },
+  { id: "static_corte", name: "Corte", price_cents: 4000, duration_min: 60 },
+  { id: "static_barba", name: "Barba", price_cents: 3000, duration_min: 60 },
+  { id: "static_corte_barba", name: "Corte + Barba", price_cents: 7000, duration_min: 60 },
   { id: "static_corte_barba_sob", name: "Corte + Barba + Sobrancelha", price_cents: 8500, duration_min: 60 },
-  { id: "static_luzes",           name: "Luzes",                       price_cents: 6000, duration_min: 60 },
-  { id: "static_platinado",       name: "Platinado",                   price_cents: 11000, duration_min: 60 },
-  { id: "static_relaxamento",     name: "Relaxamento",                 price_cents: 4000, duration_min: 60 },
-  { id: "static_limpeza",         name: "Limpeza de Pele",             price_cents: 2000, duration_min: 60 },
-  { id: "static_sobrancelha",     name: "Sobrancelha",                 price_cents: 1500, duration_min: 60 },
-  { id: "static_cavanhaque",      name: "Cavanhaque",                  price_cents: 1500, duration_min: 60 },
-  { id: "static_pezinho",         name: "Pezinho",                     price_cents: 2000, duration_min: 60 },
-  { id: "corte_mensal",           name: "Corte Mensal (Plano Mensal)", price_cents: 0,    duration_min: 60 },
+  { id: "static_luzes", name: "Luzes", price_cents: 6000, duration_min: 60 },
+  { id: "static_platinado", name: "Platinado", price_cents: 11000, duration_min: 60 },
+  { id: "static_relaxamento", name: "Relaxamento", price_cents: 4000, duration_min: 60 },
+  { id: "static_limpeza", name: "Limpeza de Pele", price_cents: 2000, duration_min: 60 },
+  { id: "static_sobrancelha", name: "Sobrancelha", price_cents: 1500, duration_min: 60 },
+  { id: "static_cavanhaque", name: "Cavanhaque", price_cents: 1500, duration_min: 60 },
+  { id: "static_pezinho", name: "Pezinho", price_cents: 2000, duration_min: 60 },
+  { id: "corte_mensal", name: "Corte Mensal (Plano Mensal)", price_cents: 0, duration_min: 60 },
 ];
 
 // ─────────────────────────────────────────────
@@ -2351,9 +2345,9 @@ function AddAppointmentModal({
   const services: Array<{ id: string; name: string; price_cents: number; duration_min: number }> =
     dbServices.length > 0
       ? [
-          ...dbServices,
-          { id: "corte_mensal", name: "Corte Mensal (Plano Mensal - R$ 0,00)", price_cents: 0, duration_min: 60 },
-        ]
+        ...dbServices,
+        { id: "corte_mensal", name: "Corte Mensal (Plano Mensal - R$ 0,00)", price_cents: 0, duration_min: 60 },
+      ]
       : STATIC_SERVICES;
 
   // Fetch active barbers if admin
@@ -2455,8 +2449,8 @@ function AddAppointmentModal({
       if (serviceId === "corte_mensal") {
         const realCorte =
           dbServices.find((s) =>
-            s.name.toLowerCase().replace(/\s+/g, "").startsWith("corte")
-          ) ?? dbServices[0];
+            s.name.trim().toLowerCase() === "corte"
+          );
         if (!realCorte?.id) {
           throw new Error(
             "Serviço 'Corte' não encontrado no banco. Cadastre os serviços no painel primeiro."
@@ -2471,8 +2465,8 @@ function AddAppointmentModal({
         if (staticSvc && dbServices.length > 0) {
           const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
           const match =
-            dbServices.find((s) => nameNorm(s.name) === nameNorm(staticSvc.name)) ??
-            dbServices[0];
+            dbServices.find((s) => nameNorm(s.name) === nameNorm(staticSvc.name));
+          if (!match) throw new Error("Serviço não cadastrado no banco. Atualize o catálogo antes de agendar.");
           targetServiceId = match.id;
         } else {
           throw new Error(

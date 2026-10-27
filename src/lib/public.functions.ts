@@ -7,20 +7,20 @@ import { publicClient } from "./supabase-public.server";
 const availabilitySchema = z.object({
   barberId: z.string().uuid(),
   // serviceId deve ser UUID real do banco (não IDs virtuais)
-  serviceId: z.string().min(1),
+  serviceId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 const bookingSchema = z.object({
   barberId: z.string().uuid(),
-  // serviceId pode ser UUID real do banco ou ID canônico virtual (srv-canonical-N)
-  serviceId: z.string().min(1),
+  // UUID real do catálogo do banco
+  serviceId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^\d{2}:\d{2}$/),
   name: z.string().trim().min(2).max(80),
   phone: z.string().trim().min(10).max(20),
-  notes: z.string().trim().max(500).optional().or(z.literal("")),
-  extraPriceCents: z.number().int().min(0).optional().default(0),
+  notes: z.string().trim().max(200).optional().or(z.literal("")),
+  addonServiceId: z.string().uuid().nullable().optional(),
   // Quando true: salva o agendamento mas zera o price_cents (cliente mensalista)
   isMensalista: z.boolean().optional().default(false),
 });
@@ -148,10 +148,10 @@ const CANONICAL_SERVICES: CanonicalService[] = [
  * que "corte" sobrescreva "corte + barba".
  */
 function findCanonical(name: string): CanonicalService | undefined {
-  const lower = name.toLowerCase();
-  // Ordena por especificidade (key mais longa primeiro)
-  const sorted = [...CANONICAL_SERVICES].sort((a, b) => b.key.length - a.key.length);
-  return sorted.find((c) => lower.includes(c.key));
+  const normalized = name.trim().toLowerCase().replace(/\s*\+\s*/g, "+").replace(/\s+/g, " ");
+  return CANONICAL_SERVICES.find((c) =>
+    c.name.toLowerCase().replace(/\s*\+\s*/g, "+").replace(/\s+/g, " ") === normalized
+  );
 }
 
 export const getSiteData = createServerFn({ method: "GET" }).handler(async () => {
@@ -201,50 +201,14 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
     return b;
   });
 
-  // Aplica os dados canônicos sobre os serviços do banco
-  services = services.map((s) => {
-    const canonical = findCanonical(s.name);
-    if (canonical) {
-      return {
-        ...s,
-        name: canonical.name,
-        description: canonical.description,
-        price_cents: canonical.price_cents,
-        duration_min: 60, // sempre 1h
-        sort_order: canonical.sort_order,
-      };
-    }
-    return { ...s, duration_min: 60 };
-  });
-
-  // Garante que todos os canônicos bookable existam (mesmo que não estejam no banco)
-  for (const canonical of CANONICAL_SERVICES) {
-    const already = services.some((s) => s.name.toLowerCase() === canonical.name.toLowerCase());
-    if (!already) {
-      services.push({
-        id: `srv-canonical-${canonical.sort_order}`,
-        name: canonical.name,
-        description: canonical.description,
-        price_cents: canonical.price_cents,
-        duration_min: 60,
-        sort_order: canonical.sort_order,
-      });
-    }
+  if (servicesRes.error) {
+    throw new Error("Não foi possível carregar os serviços. Tente novamente.");
   }
-
-  // Remove duplicatas — ID real do banco sempre tem prioridade sobre ID canônico virtual
-  const seen = new Map<string, typeof services[0]>();
-  for (const s of services) {
-    const key = s.name.toLowerCase();
-    const existing = seen.get(key);
-    const currentIsVirtual = s.id.startsWith("srv-canonical-");
-    const existingIsVirtual = existing?.id.startsWith("srv-canonical-") ?? true;
-    // Aceita o novo elemento se: não há existente, ou o existente é virtual e o novo é real
-    if (!existing || (existingIsVirtual && !currentIsVirtual)) {
-      seen.set(key, s);
-    }
-  }
-  services = Array.from(seen.values());
+  // Não inventa serviços/UUIDs nem substitui o preço gravado no banco.
+  services = services.map((s) => ({
+    ...s,
+    description: s.description ?? findCanonical(s.name)?.description ?? "",
+  }));
 
   // Ordena por sort_order
   services.sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
@@ -280,14 +244,11 @@ export const getAvailability = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = publicClient();
 
-    // Busca o horário do dia (obrigatório) e opcionalmente o serviço
-    // O serviceId pode ser um ID canônico virtual (srv-canonical-*) que não existe no banco —
-    // nesse caso usamos 60 min como duração padrão em vez de retornar slots vazios.
     const [serviceRes, hourRes] = await Promise.all([
-      // Tenta buscar pelo ID real; se não encontrar, não é erro — usamos fallback
       db
         .from("services")
         .select("duration_min")
+        .eq("active", true)
         .eq("id", data.serviceId)
         .maybeSingle(),
       db
@@ -297,6 +258,9 @@ export const getAvailability = createServerFn({ method: "POST" })
         .maybeSingle(),
     ]);
 
+    if (serviceRes.error || hourRes.error || !serviceRes.data) {
+      throw new Error("Não foi possível consultar a disponibilidade.");
+    }
     const hour = hourRes.data;
 
     // Só retorna vazio se o dia não tiver horário configurado ou estiver fechado
@@ -306,11 +270,12 @@ export const getAvailability = createServerFn({ method: "POST" })
     const durationMin = serviceRes.data?.duration_min ?? 60;
 
     const range = dayRange(data.date);
-    const { data: busyRows } = await db.rpc("get_public_busy", {
+    const { data: busyRows, error: busyError } = await db.rpc("get_public_busy", {
       _barber_id: data.barberId,
       _start: range.start,
       _end: range.end,
     });
+    if (busyError) throw new Error("Não foi possível consultar os horários ocupados.");
     const rows = busyRows ?? [];
     const unblockedNightStarts = rows
       .filter((r) => r.kind === "unblocked")
@@ -340,214 +305,53 @@ export const createBooking = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Escolha um horário futuro." };
     }
 
-    // Normalização para comparação de nomes
-    const nameNorm = (n: string) => n.toLowerCase().replace(/[^a-z0-9+]/g, "");
-
-    // ── 1. Determina o nome canônico do serviço ──────────────────────────────
-    // Usado como _label no RPC para resolução interna por SECURITY DEFINER
-    let canonicalName: string = "";
-    let canonicalPriceCents: number = 0;
-    let canonicalDurationMin: number = 60;
-
-    const isRealUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      data.serviceId
-    );
-
-    if (!isRealUuid) {
-      // ID virtual srv-canonical-N → resolve pelo sort_order
-      const canonicalOrder = parseInt(data.serviceId.replace("srv-canonical-", ""), 10);
-      const canonical = CANONICAL_SERVICES.find((c) => c.sort_order === canonicalOrder);
-      if (canonical) {
-        canonicalName = canonical.name;
-        canonicalPriceCents = canonical.price_cents;
-        canonicalDurationMin = canonical.duration_min;
-      }
-      console.log("[createBooking] ID virtual:", data.serviceId, "->", canonicalName);
+    if (startsAt.getTime() <= Date.now()) {
+      return { ok: false as const, error: "Escolha um horário futuro." };
     }
 
-    // ── 2. Tenta buscar serviços do banco (pode falhar por RLS) ──────────────
-    // Se falhar, continuamos — o RPC tem SECURITY DEFINER e resolve internamente.
-    const { data: allServices, error: svcListErr } = await supabasePublic
-      .from("services")
-      .select("id, name, price_cents, duration_min, sort_order, active")
-      .order("sort_order");
-
-    if (svcListErr) {
-      console.warn("[createBooking] SELECT services falhou (RLS?):", svcListErr.message, "— RPC vai resolver internamente");
+    // O banco valida os UUIDs, lê os preços e salva o total numa única operação.
+    // Tags de sistema são construídas aqui; o texto livre não define preços.
+    const rawNotes = (data.notes ?? "")
+      .replace(/\[(?:MENSALISTA|ADICIONAL_ID|Serviço adicional)[^\]]*\]/gi, "")
+      .trim();
+    const parts: string[] = [];
+    if (data.isMensalista) parts.push("[MENSALISTA]");
+    if (data.addonServiceId) parts.push(`[ADICIONAL_ID:${data.addonServiceId}]`);
+    if (rawNotes) parts.push(rawNotes);
+    const finalNotes = parts.join("\n");
+    if (finalNotes.length > 280) {
+      return { ok: false as const, error: "Reduza as observações para continuar." };
     }
 
-    const activeServices = allServices?.filter((s) => s.active !== false) ?? [];
-    const anyServices = allServices ?? [];
-
-    // ── 3. Resolve UUID real e nome canônico ────────────────────────────────
-    // rpcServiceId = UUID a enviar ao RPC (pode ser zero UUID se banco inacessível)
-    // rpcLabel     = nome do serviço para fallback interno no RPC por SECURITY DEFINER
-    // NULL_UUID    = UUID sentinel que o RPC vai ignorar e usar _label
-    const NULL_UUID = "00000000-0000-0000-0000-000000000000";
-    let rpcServiceId: string;
-    let rpcLabel: string;
-    let clientPriceCents: number = canonicalPriceCents;
-    let clientDurationMin: number = canonicalDurationMin;
-
-    if (isRealUuid) {
-      // UUID real: pode ou não existir no banco local
-      const byId = anyServices.find((s) => s.id === data.serviceId);
-      if (byId) {
-        rpcServiceId = byId.id;
-        rpcLabel     = byId.name;
-        clientPriceCents  = byId.price_cents;
-        clientDurationMin = byId.duration_min;
-        console.log("[createBooking] UUID real encontrado:", rpcServiceId, rpcLabel);
-      } else {
-        // UUID não encontrado localmente (RLS bloqueou ou serviço novo)
-        // Mandamos o UUID mesmo assim — o RPC tenta pelo UUID e cai no fallback por nome
-        rpcServiceId = data.serviceId;
-        // Tenta resolver nome via canônicos pelo UUID → só possível se coincidencialmente
-        // o ID mapeia para algo na lista local; se não, usamos ID como label
-        const matchByOrder = activeServices.find((s) =>
-          nameNorm(s.name) === nameNorm(canonicalName)
-        );
-        rpcLabel = matchByOrder?.name ?? (canonicalName || data.serviceId);
-        if (matchByOrder) {
-          clientPriceCents  = matchByOrder.price_cents;
-          clientDurationMin = matchByOrder.duration_min;
-        }
-        console.warn("[createBooking] UUID", data.serviceId, "não encontrado localmente — RPC vai testar internamente, label:", rpcLabel);
-      }
-    } else {
-      // ID virtual srv-canonical-N
-      const canonical = CANONICAL_SERVICES.find((c) => nameNorm(c.name) === nameNorm(canonicalName));
-
-      // Tenta encontrar o UUID real pelo nome no banco local
-      const dbMatch =
-        activeServices.find((s) => nameNorm(s.name) === nameNorm(canonicalName)) ??
-        anyServices.find((s) => nameNorm(s.name) === nameNorm(canonicalName)) ??
-        (canonical ? (
-          activeServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key))) ??
-          anyServices.find((s) => nameNorm(s.name).includes(nameNorm(canonical.key)))
-        ) : undefined);
-
-      if (dbMatch) {
-        rpcServiceId = dbMatch.id;
-        rpcLabel     = dbMatch.name;
-        clientPriceCents  = canonical?.price_cents ?? dbMatch.price_cents;
-        clientDurationMin = dbMatch.duration_min;
-        console.log("[createBooking] ID virtual resolvido por nome:", rpcServiceId, rpcLabel);
-      } else if (anyServices.length > 0) {
-        // Banco acessível mas serviço não existe — usa primeiro ativo como FK
-        // (o RPC vai usar o nome canônico via _label para criar o registro)
-        const firstActive = activeServices[0] ?? anyServices[0];
-        rpcServiceId = firstActive.id;
-        rpcLabel     = canonicalName || firstActive.name;
-        clientPriceCents  = canonicalPriceCents || firstActive.price_cents;
-        console.warn("[createBooking] Serviço canônico não encontrado no banco — FK fallback:", rpcServiceId, "label:", rpcLabel);
-      } else {
-        // Banco completamente inacessível (RLS bloqueou tudo)
-        // Usamos UUID nulo e o RPC resolve pelo nome (_label) com SECURITY DEFINER
-        rpcServiceId = NULL_UUID;
-        rpcLabel     = canonicalName;
-        console.warn("[createBooking] Banco inacessível — usando NULL_UUID + label:", rpcLabel);
-      }
-    }
-
-    if (!rpcLabel) {
-      console.error("[createBooking] Não foi possível determinar nome do serviço.");
-      return {
-        ok: false as const,
-        error: "Serviço inválido. Recarregue a página e tente novamente.",
-      };
-    }
-
-    console.log("[createBooking] Chamando RPC — service_id:", rpcServiceId, "label:", rpcLabel);
-
-    // ── 4. Monta _notes injetando [MENSALISTA] quando aplicável ─────────────
-    // O RPC create_public_booking detecta [MENSALISTA] em _notes e grava
-    // price_cents = 0 diretamente na criação — não é necessário nenhum UPDATE
-    // posterior para o caso mensalista.
-    const isMensalista = data.isMensalista ?? false;
-    const startsAtIso = startsAt.toISOString();
-
-    // Constrói as partes das notas em ordem:
-    //   1. Tag [MENSALISTA] (se aplicável)
-    //   2. Observações livres do cliente (se houver)
-    // O tag é adicionado UMA única vez; o conteúdo total é truncado a 500 chars
-    // (limite do schema) mas o front-end já limita a 280.
-    const rawNotes = data.notes?.trim() ?? "";
-    const noteParts: string[] = [];
-    if (isMensalista) noteParts.push("[MENSALISTA — serviço sem cobrança]");
-    if (rawNotes) noteParts.push(rawNotes);
-    const finalNotes = noteParts.join("\n").slice(0, 500);
-
-    // ── 5. Chama o RPC create_public_booking (SECURITY DEFINER) ─────────────
-    // SECURITY DEFINER bypassa RLS — resolve serviço pelo UUID ou pelo _label.
-    // Valida serviço ativo, barbeiro ativo, conflito atômico de horário.
-    // Quando _notes contém [MENSALISTA], o RPC grava price_cents = 0 e retorna
-    // priceCents = 0 no JSON resultante.
     const { data: rpcResult, error: rpcErr } = await supabasePublic.rpc("create_public_booking", {
-      _barber_id:  data.barberId,
-      _service_id: rpcServiceId,
-      _starts_at:  startsAtIso,
-      _name:       data.name,
-      _phone:      data.phone,
-      _notes:      finalNotes,
-      _label:      rpcLabel,
+      _barber_id: data.barberId,
+      _service_id: data.serviceId,
+      _starts_at: startsAt.toISOString(),
+      _name: data.name,
+      _phone: data.phone,
+      _notes: finalNotes,
+      _label: "",
     });
-
     if (rpcErr) {
-      console.error("[createBooking] Erro no RPC create_public_booking:", rpcErr);
+      console.error("[createBooking] RPC falhou:", rpcErr.code);
       return { ok: false as const, error: "Não foi possível concluir o agendamento. Tente novamente." };
     }
-
-    // O RPC retorna JSON: { ok, id?, barberName?, serviceName?, priceCents?, error? }
     const result = rpcResult as {
-      ok: boolean;
-      id?: string;
-      barberName?: string;
-      serviceName?: string;
-      priceCents?: number;
-      error?: string;
-    };
-
-    if (!result.ok) {
-      console.error("[createBooking] RPC retornou erro lógico:", result.error);
-      return { ok: false as const, error: result.error ?? "Não foi possível concluir o agendamento." };
+      ok?: boolean; id?: string; barberName?: string;
+      serviceName?: string; priceCents?: number; error?: string;
+    } | null;
+    if (!result?.ok) {
+      return { ok: false as const, error: result?.error ?? "Não foi possível concluir o agendamento." };
     }
-
-    // ── 6. Preço final ───────────────────────────────────────────────────────
-    // Usa comparação explícita com null/undefined para preservar zero do RPC:
-    //   • Mensalista: RPC retorna priceCents = 0 → usamos 0 (não somamos addon)
-    //   • Não mensalista: priceCents do RPC (preço do serviço) + extraCents (addon)
-    // NUNCA chamamos set_appointment_price nem UPDATE posterior para mensalista;
-    // o preço zero já está gravado pelo RPC na criação.
-    const extraCents = isMensalista ? 0 : (data.extraPriceCents ?? 0);
-
-    // result.priceCents pode ser 0 (mensalista) — não usar ?? aqui para não
-    // substituir zero por clientPriceCents.
-    const basePriceCents = result.priceCents != null ? result.priceCents : (clientPriceCents ?? 0);
-    const totalPriceCents = isMensalista ? 0 : basePriceCents + extraCents;
-
-    // Addon (serviço adicional para não-mensalistas): atualiza price_cents
-    // somando o valor extra do addon ao preço base do serviço.
-    if (!isMensalista && result.id && extraCents > 0) {
-      const addonTotal = basePriceCents + extraCents;
-      const { error: rpcPriceErr } = await supabasePublic.rpc("set_appointment_price", {
-        _appointment_id: result.id,
-        _price_cents: addonTotal,
-      });
-      if (rpcPriceErr) {
-        console.warn("[createBooking] set_appointment_price (addon) falhou:", rpcPriceErr.message);
-      } else {
-        console.log("[createBooking] price_cents addon atualizado para:", addonTotal);
-      }
+    // Sem UPDATE posterior, preço vindo do navegador ou fallback para Corte.
+    if (!result.id || typeof result.priceCents !== "number" || !result.serviceName || !result.barberName) {
+      return { ok: false as const, error: "Resposta incompleta. Confira a reserva com a barbearia antes de tentar novamente." };
     }
-
-    console.log("[createBooking] Agendamento criado:", result.id, "barbeiro:", result.barberName, "serviço:", result.serviceName, "price_cents:", totalPriceCents);
-
     return {
       ok: true as const,
-      id:          result.id ?? "",
-      barberName:  result.barberName ?? "",
-      serviceName: result.serviceName ?? rpcLabel,
-      priceCents:  totalPriceCents,
+      id: result.id,
+      barberName: result.barberName,
+      serviceName: result.serviceName,
+      priceCents: result.priceCents,
     };
   });
