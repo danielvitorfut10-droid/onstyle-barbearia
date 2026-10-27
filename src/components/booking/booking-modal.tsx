@@ -11,6 +11,7 @@ import {
   MessageCircle,
   Plus,
   Scissors,
+  ShieldCheck,
   User,
   X,
 } from "lucide-react";
@@ -59,6 +60,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
   const [serviceId, setServiceId] = useState<string | null>(null);
   // Optional add-on service (Relaxamento or Limpeza de pele)
   const [addonServiceId, setAddonServiceId] = useState<string | null>(null);
+  // Mensalista mode — zeroes the service price
+  const [isMensalista, setIsMensalista] = useState(false);
+  const [showMensalistaConfirm, setShowMensalistaConfirm] = useState(false);
   const [date, setDate] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -72,8 +76,10 @@ export function BookingModal({ open, onOpenChange }: Props) {
     ? (site?.services.find((s) => s.id === addonServiceId) ?? null)
     : null;
 
-  // Total price = primary + optional addon
-  const totalPriceCents = (service?.price_cents ?? 0) + (addonService?.price_cents ?? 0);
+  // Total price = primary + optional addon; zeroed when mensalista
+  const totalPriceCents = isMensalista
+    ? 0
+    : (service?.price_cents ?? 0) + (addonService?.price_cents ?? 0);
 
   // Combined display name
   const combinedServiceName = addonService
@@ -115,6 +121,8 @@ export function BookingModal({ open, onOpenChange }: Props) {
         setBarberId(null);
         setServiceId(null);
         setAddonServiceId(null);
+        setIsMensalista(false);
+        setShowMensalistaConfirm(false);
         setDate(null);
         setTime(null);
         setName("");
@@ -158,6 +166,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
   // Build notes: prepend addon info so the panel sees it
   const buildFinalNotes = () => {
     const parts: string[] = [];
+    if (isMensalista) {
+      parts.push(`[MENSALISTA — serviço sem cobrança]`);
+    }
     if (addonService) {
       parts.push(`[Serviço adicional: ${addonService.name} — ${formatBRL(addonService.price_cents)}]`);
     }
@@ -351,57 +362,110 @@ export function BookingModal({ open, onOpenChange }: Props) {
                   </div>
 
                   {/* Add-on services section */}
-                  {addonServices.length > 0 && (
-                    <div className="mt-1">
-                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1 mb-2">
-                        + Adicionar ao agendamento (opcional)
-                      </p>
-                      <div className="flex flex-col gap-2">
-                        {addonServices.map((s) => {
-                          const selected = addonServiceId === s.id;
-                          return (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => toggleAddon(s)}
-                              className={cn(
-                                "flex items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card/60 p-3 text-left transition-all hover:border-foreground/40 hover:bg-accent/40 w-full min-w-0",
-                                selected && "border-foreground bg-accent/60 ring-1 ring-foreground border-solid",
-                              )}
-                            >
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                {selected ? (
-                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                                    <X className="h-3 w-3" />
-                                  </span>
-                                ) : (
-                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
-                                    <Plus className="h-3 w-3" />
-                                  </span>
-                                )}
-                                <span className="font-display text-sm font-medium text-foreground truncate">
-                                  {s.name}
+                  <div className="mt-1">
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold px-1 mb-2">
+                      + Adicionar ao agendamento (opcional)
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {addonServices.map((s) => {
+                        const selected = addonServiceId === s.id;
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => toggleAddon(s)}
+                            className={cn(
+                              "flex items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card/60 p-3 text-left transition-all hover:border-foreground/40 hover:bg-accent/40 w-full min-w-0",
+                              selected && "border-foreground bg-accent/60 ring-1 ring-foreground border-solid",
+                            )}
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              {selected ? (
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                                  <X className="h-3 w-3" />
                                 </span>
-                              </div>
-                              <span className="font-display text-sm font-semibold text-foreground shrink-0">
-                                {formatBRL(s.price_cents)}
+                              ) : (
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
+                                  <Plus className="h-3 w-3" />
+                                </span>
+                              )}
+                              <span className="font-display text-sm font-medium text-foreground truncate">
+                                {s.name}
                               </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                            </div>
+                            <span className="font-display text-sm font-semibold text-foreground shrink-0">
+                              {formatBRL(s.price_cents)}
+                            </span>
+                          </button>
+                        );
+                      })}
+
+                      {/* ── Mensalista ── */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isMensalista) {
+                            // toggle off
+                            setIsMensalista(false);
+                          } else {
+                            setShowMensalistaConfirm(true);
+                          }
+                        }}
+                        className={cn(
+                          "flex items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-card/60 p-3 text-left transition-all hover:border-amber-500/60 hover:bg-amber-500/10 w-full min-w-0",
+                          isMensalista && "border-amber-500 bg-amber-500/15 ring-1 ring-amber-500 border-solid",
+                        )}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {isMensalista ? (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
+                              <X className="h-3 w-3" />
+                            </span>
+                          ) : (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-500/60 text-amber-500">
+                              <ShieldCheck className="h-3 w-3" />
+                            </span>
+                          )}
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-display text-sm font-medium text-foreground truncate">
+                              Mensalista
+                            </span>
+                            {isMensalista && (
+                              <span className="text-[10px] text-amber-400 font-semibold">
+                                Pagamento mensal ativo — sem cobrança
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className={cn(
+                          "font-display text-sm font-semibold shrink-0",
+                          isMensalista ? "text-amber-400 line-through" : "text-muted-foreground"
+                        )}>
+                          {isMensalista ? formatBRL(service?.price_cents ?? 0) : "R$ 0,00"}
+                        </span>
+                      </button>
                     </div>
-                  )}
+                  </div>
 
                   {/* Total price summary when something is selected */}
                   {serviceId && (
-                    <div className="mt-1 rounded-xl border border-border bg-secondary/30 p-3 flex items-center justify-between">
+                    <div className={cn(
+                      "mt-1 rounded-xl border p-3 flex items-center justify-between",
+                      isMensalista
+                        ? "border-amber-500/40 bg-amber-500/10"
+                        : "border-border bg-secondary/30"
+                    )}>
                       <span className="text-xs text-muted-foreground">
-                        {addonService
-                          ? `${service?.name} + ${addonService.name}`
-                          : service?.name}
+                        {isMensalista
+                          ? `${service?.name} (mensalista)`
+                          : addonService
+                            ? `${service?.name} + ${addonService.name}`
+                            : service?.name}
                       </span>
-                      <span className="font-display text-sm font-bold text-foreground">
+                      <span className={cn(
+                        "font-display text-sm font-bold",
+                        isMensalista ? "text-amber-400" : "text-foreground"
+                      )}>
                         {formatBRL(totalPriceCents)}
                       </span>
                     </div>
@@ -569,6 +633,13 @@ export function BookingModal({ open, onOpenChange }: Props) {
                       value={addonService.name}
                     />
                   )}
+                  {isMensalista && (
+                    <ReviewRow
+                      icon={<ShieldCheck className="h-4 w-4" />}
+                      label="Tipo de pagamento"
+                      value="Mensalista (sem cobrança)"
+                    />
+                  )}
                   <ReviewRow
                     icon={<Scissors className="h-4 w-4" />}
                     label="Total"
@@ -625,6 +696,45 @@ export function BookingModal({ open, onOpenChange }: Props) {
           </div>
         )}
       </DialogContent>
+
+      {/* ── Mensalista Confirmation Popup ─────────────────── */}
+      <Dialog open={showMensalistaConfirm} onOpenChange={setShowMensalistaConfirm}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm rounded-2xl border-border bg-popover p-6 shadow-2xl gap-0">
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/15 border border-amber-500/30">
+              <ShieldCheck className="h-8 w-8 text-amber-400" />
+            </div>
+            <div className="space-y-1.5">
+              <DialogTitle className="font-display text-base font-semibold">
+                Confirmar plano mensalista
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
+                Você confirma que é um cliente com pagamento mensal ativo? Ao confirmar, o serviço
+                será agendado sem cobrança adicional.
+              </DialogDescription>
+            </div>
+            <div className="w-full space-y-2 pt-1">
+              <Button
+                className="w-full bg-amber-500 hover:bg-amber-400 text-black font-semibold"
+                onClick={() => {
+                  setIsMensalista(true);
+                  setShowMensalistaConfirm(false);
+                }}
+              >
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                Sim, sou mensalista
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => setShowMensalistaConfirm(false)}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
