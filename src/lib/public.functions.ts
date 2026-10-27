@@ -504,19 +504,30 @@ export const createBooking = createServerFn({ method: "POST" })
     const totalPriceCents = isMensalista ? 0 : basePriceCents + extraCents;
 
     // Atualiza o price_cents no banco em dois casos:
-    //   a) mensalista → zera o valor (UPDATE price_cents = 0)
+    //   a) mensalista → zera o valor (price_cents = 0)
     //   b) addon      → soma o valor adicional
-    // A política RLS "Public update own appointment price" permite anon UPDATE.
+    // Usa o RPC set_appointment_price com SECURITY DEFINER para garantir que o
+    // UPDATE sempre funcionará, mesmo que a RLS bloqueie updates diretos de anon.
     if (result.id && (isMensalista || extraCents > 0)) {
-      const { error: updErr } = await supabasePublic
-        .from("appointments")
-        .update({ price_cents: totalPriceCents })
-        .eq("id", result.id);
-      if (updErr) {
-        // Não é crítico: o agendamento foi criado. Só o preço não foi zerado/atualizado.
-        console.warn("[createBooking] UPDATE price_cents falhou:", updErr.message);
+      // Tenta primeiro via RPC SECURITY DEFINER (bypassa RLS)
+      const { error: rpcPriceErr } = await supabasePublic.rpc("set_appointment_price", {
+        _appointment_id: result.id,
+        _price_cents: totalPriceCents,
+      });
+      if (rpcPriceErr) {
+        // Fallback: tenta UPDATE direto
+        console.warn("[createBooking] RPC set_appointment_price falhou:", rpcPriceErr.message, "— tentando UPDATE direto");
+        const { error: updErr } = await supabasePublic
+          .from("appointments")
+          .update({ price_cents: totalPriceCents })
+          .eq("id", result.id);
+        if (updErr) {
+          console.warn("[createBooking] UPDATE price_cents direto também falhou:", updErr.message);
+        } else {
+          console.log("[createBooking] price_cents atualizado via UPDATE direto para:", totalPriceCents);
+        }
       } else {
-        console.log("[createBooking] price_cents atualizado para:", totalPriceCents, isMensalista ? "(mensalista)" : "(addon)");
+        console.log("[createBooking] price_cents atualizado via RPC para:", totalPriceCents, isMensalista ? "(mensalista)" : "(addon)");
       }
     }
 

@@ -1905,37 +1905,58 @@ function ClientesTab({
                   </div>
 
                   {/* Booking Details Box */}
-                  <div className="space-y-2 rounded-xl bg-zinc-950/60 p-3 text-xs border border-zinc-800/80 mb-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-zinc-500">Serviço:</span>
-                      <span className="font-semibold text-white">{appt.services?.name ?? "Serviço"}</span>
-                    </div>
+                  {(() => {
+                    const isMensalistaAppt = !!(appt.notes?.includes("[MENSALISTA") || appt.notes?.includes("MENSALISTA"));
+                    // Remove a tag interna das notes para exibição ao usuário
+                    const cleanNotes = appt.notes
+                      ? appt.notes
+                          .replace(/\[MENSALISTA[^\]]*\]/gi, "")
+                          .replace(/\[Serviço adicional:[^\]]*\]/gi, "")
+                          .trim()
+                      : null;
+                    return (
+                      <div className="space-y-2 rounded-xl bg-zinc-950/60 p-3 text-xs border border-zinc-800/80 mb-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-500">Serviço:</span>
+                          <span className="font-semibold text-white">{appt.services?.name ?? "Serviço"}</span>
+                        </div>
 
-                    <div className="flex justify-between items-center">
-                      <span className="text-zinc-500">Data e Hora:</span>
-                      <span className="font-semibold text-[#39ff14]">
-                        {formattedDate} às {formattedTime}
-                      </span>
-                    </div>
+                        {isMensalistaAppt && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-zinc-500">Plano:</span>
+                            <span className="font-bold text-amber-400">MENSALISTA – sem cobrança</span>
+                          </div>
+                        )}
 
-                    <div className="flex justify-between items-center">
-                      <span className="text-zinc-500">Valor:</span>
-                      <span className="font-bold text-white">{formatBRL(appt.price_cents)}</span>
-                    </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-500">Data e Hora:</span>
+                          <span className="font-semibold text-[#39ff14]">
+                            {formattedDate} às {formattedTime}
+                          </span>
+                        </div>
 
-                    {role === "admin" && appt.barbers?.name && (
-                      <div className="flex justify-between items-center pt-1 border-t border-zinc-800/60">
-                        <span className="text-zinc-500">Barbeiro:</span>
-                        <span className="font-medium text-zinc-300">{appt.barbers.name}</span>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-500">Valor:</span>
+                          <span className={`font-bold ${isMensalistaAppt && appt.price_cents === 0 ? "text-amber-400" : "text-white"}`}>
+                            {isMensalistaAppt && appt.price_cents === 0 ? "R$ 0,00 (mensalista)" : formatBRL(appt.price_cents)}
+                          </span>
+                        </div>
+
+                        {role === "admin" && appt.barbers?.name && (
+                          <div className="flex justify-between items-center pt-1 border-t border-zinc-800/60">
+                            <span className="text-zinc-500">Barbeiro:</span>
+                            <span className="font-medium text-zinc-300">{appt.barbers.name}</span>
+                          </div>
+                        )}
+
+                        {cleanNotes && !isMensalistaAppt && (
+                          <div className="pt-1 text-[11px] text-zinc-400 italic">
+                            "{cleanNotes}"
+                          </div>
+                        )}
                       </div>
-                    )}
-
-                    {appt.notes && (
-                      <div className="pt-1 text-[11px] text-zinc-400 italic">
-                        "{appt.notes}"
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Actions Footer */}

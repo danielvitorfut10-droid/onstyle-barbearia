@@ -487,6 +487,13 @@ export type Database = {
         }
         Returns: boolean
       }
+      set_appointment_price: {
+        Args: {
+          _appointment_id: string
+          _price_cents: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "admin" | "barber" | "client"
