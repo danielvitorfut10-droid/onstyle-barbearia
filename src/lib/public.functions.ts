@@ -463,21 +463,18 @@ export const createBooking = createServerFn({ method: "POST" })
     // ── 4. Chama o RPC create_public_booking (SECURITY DEFINER) ─────────────
     // SECURITY DEFINER bypassa RLS — resolve serviço pelo UUID ou pelo _label.
     // Valida serviço ativo, barbeiro ativo, conflito atômico de horário.
-    // Determina flag mensalista antes da chamada para usar no _price_override
     const isMensalista = data.isMensalista ?? false;
     const startsAtIso = startsAt.toISOString();
     const finalNotes = data.notes?.trim() ?? "";
 
     const { data: rpcResult, error: rpcErr } = await supabasePublic.rpc("create_public_booking", {
-      _barber_id:      data.barberId,
-      _service_id:     rpcServiceId,
-      _starts_at:      startsAtIso,
-      _name:           data.name,
-      _phone:          data.phone,
-      _notes:          finalNotes,
-      _label:          rpcLabel,
-      // Mensalista: força preço 0 direto no INSERT do banco (não depende de UPDATE posterior)
-      _price_override: isMensalista ? 0 : -1, // -1 = usa o preço do serviço
+      _barber_id:  data.barberId,
+      _service_id: rpcServiceId,
+      _starts_at:  startsAtIso,
+      _name:       data.name,
+      _phone:      data.phone,
+      _notes:      finalNotes,
+      _label:      rpcLabel,
     });
 
     if (rpcErr) {
@@ -500,23 +497,26 @@ export const createBooking = createServerFn({ method: "POST" })
       return { ok: false as const, error: result.error ?? "Não foi possível concluir o agendamento." };
     }
 
-    // ── 5. Preço: serviço principal (do banco via RPC) + addon opcional ──────
+    // ── 5. Preço final ───────────────────────────────────────────────────────
     // Mensalista tem prioridade absoluta: preço sempre 0
-    // (o RPC já inseriu com price_cents=0, então result.priceCents == 0)
     const extraCents = isMensalista ? 0 : (data.extraPriceCents ?? 0);
     const basePriceCents = result.priceCents ?? clientPriceCents ?? 0;
     const totalPriceCents = isMensalista ? 0 : basePriceCents + extraCents;
 
-    // Atualiza o preço no banco apenas quando há addon (mensalista já veio zerado do RPC)
-    if (result.id && !isMensalista && extraCents > 0) {
+    // Atualiza o price_cents no banco em dois casos:
+    //   a) mensalista → zera o valor (UPDATE price_cents = 0)
+    //   b) addon      → soma o valor adicional
+    // A política RLS "Public update own appointment price" permite anon UPDATE.
+    if (result.id && (isMensalista || extraCents > 0)) {
       const { error: updErr } = await supabasePublic
         .from("appointments")
         .update({ price_cents: totalPriceCents })
         .eq("id", result.id);
       if (updErr) {
-        console.warn("[createBooking] Não foi possível atualizar preço do addon:", updErr.message);
+        // Não é crítico: o agendamento foi criado. Só o preço não foi zerado/atualizado.
+        console.warn("[createBooking] UPDATE price_cents falhou:", updErr.message);
       } else {
-        console.log("[createBooking] Preço addon atualizado para:", totalPriceCents);
+        console.log("[createBooking] price_cents atualizado para:", totalPriceCents, isMensalista ? "(mensalista)" : "(addon)");
       }
     }
 
