@@ -103,7 +103,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/b306752a-d060-4f83-ada0-d5525aeaa042/id-preview-3ea1a44b--7a263d8f-5371-42bc-ad05-07bc7a9ae74a.lovable.app-1785894619680.png" },
     ],
     links: [
-      { rel: "canonical", href: "https://studioblackout.com.br" },
+      { rel: "canonical", href: "https://www.onstylebarbearia.com.br" },
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", href: "/logoonstyle.png", type: "image/png" },
