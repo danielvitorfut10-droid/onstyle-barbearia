@@ -160,7 +160,7 @@ export const getSiteData = createServerFn({ method: "GET" }).handler(async () =>
   const [barbersRes, servicesRes, hoursRes, settingsRes] = await Promise.all([
     db
       .from("barbers")
-      .select("id, name, nickname, bio, photo_url, sort_order")
+      .select("id, name, nickname, bio, photo_url, sort_order, booking_enabled")
       .eq("active", true)
       .order("sort_order"),
     db
@@ -244,7 +244,12 @@ export const getAvailability = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = publicClient();
 
-    const [serviceRes, hourRes] = await Promise.all([
+    const [barberRes, serviceRes, hourRes] = await Promise.all([
+      db
+        .from("barbers")
+        .select("active, booking_enabled")
+        .eq("id", data.barberId)
+        .maybeSingle(),
       db
         .from("services")
         .select("duration_min")
@@ -258,8 +263,11 @@ export const getAvailability = createServerFn({ method: "POST" })
         .maybeSingle(),
     ]);
 
-    if (serviceRes.error || hourRes.error || !serviceRes.data) {
+    if (barberRes.error || serviceRes.error || hourRes.error || !serviceRes.data) {
       throw new Error("Não foi possível consultar a disponibilidade.");
+    }
+    if (!barberRes.data || !barberRes.data.active || !barberRes.data.booking_enabled) {
+      return { slots: [] as { time: string; iso: string }[] };
     }
     const hour = hourRes.data;
 
