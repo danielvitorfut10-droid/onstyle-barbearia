@@ -23,6 +23,7 @@ const STATIC_PATTERNS = [
 // Rotas que NUNCA devem ser interceptadas pelo SW
 const BYPASS_PATTERNS = [
   /\/_build\//,
+  /\/_serverFn\//,
   /\/api\//,
   /supabase/,
   /lovable\.cloud/,

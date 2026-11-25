@@ -2,9 +2,9 @@ import { queryOptions } from "@tanstack/react-query";
 import { getSiteData } from "./public.functions";
 
 export const siteQueryOptions = queryOptions({
-  queryKey: ["site-data"],
+  queryKey: ["site-data", "v2"],
   queryFn: () => getSiteData(),
-  staleTime: 5 * 60 * 1000,
+  staleTime: 30 * 1000,
 });
 
 export type SiteData = Awaited<ReturnType<typeof getSiteData>>;

@@ -50,7 +50,7 @@ type ServiceOption = {
 };
 
 export function BookingModal({ open, onOpenChange }: Props) {
-  const { data: site } = useQuery(siteQueryOptions);
+  const { data: site, refetch: refetchSite } = useQuery(siteQueryOptions);
   const availabilityFn = useServerFn(getAvailability);
   const createFn = useServerFn(createBooking);
 
@@ -115,7 +115,9 @@ export function BookingModal({ open, onOpenChange }: Props) {
   );
 
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      void refetchSite();
+    } else {
       const timer = setTimeout(() => {
         setStep(0);
         setBarberId(null);
@@ -132,7 +134,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
       }, 250);
       return () => clearTimeout(timer);
     }
-  }, [open]);
+  }, [open, refetchSite]);
 
   const closedWeekdays = useMemo(
     () => new Set((site?.hours ?? []).filter((h) => h.closed).map((h) => h.weekday)),
@@ -151,7 +153,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
 
   const slotsQuery = useQuery({
     queryKey: ["availability", barberId, serviceId, date],
-    enabled: Boolean(open && barber?.booking_enabled && barberId && serviceId && date),
+    enabled: Boolean(open && barber && barber.booking_enabled !== false && barberId && serviceId && date),
     staleTime: 0,          // sempre busca fresco ao mudar data/barbeiro/serviço
     gcTime: 2 * 60 * 1000, // mantém cache por 2 min para navegação entre steps
     retry: 1,
@@ -204,7 +206,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
   });
 
   const canAdvance =
-    (step === 0 && Boolean(barber?.booking_enabled)) ||
+    (step === 0 && Boolean(barber && barber.booking_enabled !== false)) ||
     (step === 1 && serviceId) ||
     (step === 2 && date) ||
     (step === 3 && time) ||
@@ -273,7 +275,7 @@ export function BookingModal({ open, onOpenChange }: Props) {
                   {!site
                     ? [0, 1].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)
                     : site.barbers.map((b) => {
-                      const unavailable = !b.booking_enabled;
+                      const unavailable = b.booking_enabled === false;
                       return (
                         <button
                           key={b.id}
